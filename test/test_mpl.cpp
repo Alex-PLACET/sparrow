@@ -14,6 +14,7 @@
 
 #include <concepts>
 #include <list>
+#include <optional>
 #include <variant>
 #include <vector>
 
@@ -137,4 +138,69 @@ namespace sparrow
     };
 
     static_assert(mpl::boolean_like<like_a_bool>);
+    
+    // unique_ptr
+    static_assert(mpl::unique_ptr<std::unique_ptr<int>>);
+    static_assert(not mpl::unique_ptr<int>);
+    static_assert(not mpl::unique_ptr<std::shared_ptr<int>>);
+    static_assert(not mpl::unique_ptr<std::weak_ptr<int>>);
+    static_assert(not mpl::unique_ptr<int*>);
+
+    // shared_ptr
+    static_assert(mpl::shared_ptr<std::shared_ptr<int>>);
+    static_assert(not mpl::shared_ptr<int>);
+    static_assert(not mpl::shared_ptr<std::unique_ptr<int>>);
+    static_assert(not mpl::shared_ptr<std::weak_ptr<int>>);
+    static_assert(not mpl::shared_ptr<int*>);
+
+    // smart_ptr
+    static_assert(mpl::smart_ptr<std::unique_ptr<int>>);
+    static_assert(mpl::smart_ptr<std::shared_ptr<int>>);
+    static_assert(not mpl::smart_ptr<int>);
+    static_assert(not mpl::smart_ptr<std::weak_ptr<int>>);
+    static_assert(not mpl::smart_ptr<int*>);
+
+    // has_element_type
+    static_assert(mpl::has_element_type<std::unique_ptr<int>>);
+    static_assert(mpl::has_element_type<std::shared_ptr<int>>);
+    static_assert(not mpl::has_element_type<int>);
+    static_assert(not mpl::has_element_type<int*>);
+
+    // get_element_type_t
+    static_assert(std::same_as<mpl::get_element_type_t<std::unique_ptr<int>>, int>);
+    static_assert(std::same_as<mpl::get_element_type_t<std::shared_ptr<int>>, int>);
+    static_assert(std::same_as<mpl::get_element_type_t<std::vector<int>>, void>);
+
+    // has_deleter_type
+    static_assert(mpl::has_deleter_type<std::unique_ptr<int>>);
+    static_assert(not mpl::has_deleter_type<std::shared_ptr<int>>);
+    static_assert(not mpl::has_deleter_type<int>);
+    static_assert(not mpl::has_deleter_type<int*>);
+
+    // get_deleter_type_t
+    static_assert(std::same_as<mpl::get_deleter_type_t<std::unique_ptr<int>>, std::default_delete<int>>);
+    static_assert(std::same_as<mpl::get_deleter_type_t<std::shared_ptr<int>>, void>);
+    static_assert(std::same_as<mpl::get_deleter_type_t<std::vector<int>>, void>);
+
+    // string_like
+    static_assert(mpl::string_like<std::string>);
+    static_assert(mpl::string_like<std::string_view>);
+    static_assert(mpl::string_like<const char*>);
+    static_assert(mpl::string_like<char*>);
+    static_assert(mpl::string_like<const char* const>);
+    static_assert(mpl::string_like<char* const>);
+    static_assert(mpl::string_like<std::vector<char>>);
+    static_assert(not mpl::string_like<int>);
+
+    // string_like_or_null
+    static_assert(mpl::string_like_or_null<std::string>);
+    static_assert(mpl::string_like_or_null<std::string_view>);
+    static_assert(mpl::string_like_or_null<const char*>);
+    static_assert(mpl::string_like_or_null<char*>);
+    static_assert(mpl::string_like_or_null<const char* const>);
+    static_assert(mpl::string_like_or_null<char* const>);
+    static_assert(mpl::string_like_or_null<std::vector<char>>);
+    static_assert(mpl::string_like_or_null<std::nullptr_t>);
+    static_assert(mpl::string_like_or_null<std::nullopt_t>);
+    static_assert(not mpl::string_like_or_null<int>);
 }

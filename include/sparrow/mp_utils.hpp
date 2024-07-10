@@ -15,6 +15,9 @@
 #pragma once
 
 #include <iterator>
+#include <memory>
+#include <optional>
+#include <ranges>
 #include <type_traits>
 
 namespace sparrow::mpl
@@ -424,4 +427,81 @@ namespace sparrow::mpl
     template <class T>
     concept boolean_like = std::is_assignable_v<std::add_lvalue_reference_t<T>, bool> and 
                            requires { static_cast<bool>(std::declval<T>()); };
+                           
+    // Matches any `unique_ptr` instance.
+    template <typename T>
+    concept unique_ptr = mpl::is_type_instance_of_v<std::remove_reference_t<T>, std::unique_ptr>;
+
+    // Matches any `unique_ptr` or derived instance.
+    template <typename T>
+    concept unique_ptr_or_derived = unique_ptr<T>
+                                    || std::derived_from<T, std::unique_ptr<typename T::element_type>>;
+
+    // Matches any `shared_ptr` instance.
+    template <typename T>
+    concept shared_ptr = mpl::is_type_instance_of_v<std::remove_reference_t<T>, std::shared_ptr>;
+
+    // Matches any `shared_ptr` or derived instance.
+    template <typename T>
+    concept shared_ptr_or_derived = shared_ptr<T>
+                                    || std::derived_from<T, std::shared_ptr<typename T::element_type>>;
+
+    // Matches any `unique_ptr` or `shared_ptr` instance.
+    template <typename T>
+    concept smart_ptr = unique_ptr<T> || shared_ptr<T>;
+
+    // Matches any `unique_ptr` or `shared_ptr` or derived instance.
+    template <typename T>
+    concept smart_ptr_and_derived = shared_ptr_or_derived<T> || unique_ptr_or_derived<T>;
+
+    // Matches any type that has an element_type member.
+    template <typename T>
+    concept has_element_type = requires { typename T::element_type; };
+
+    template <typename T>
+    struct get_element_type_helper
+    {
+        using type = void;
+    };
+
+    template <has_element_type T>
+    struct get_element_type_helper<T>
+    {
+        using type = typename T::element_type;
+    };
+
+    // Get the element type of a type. If it does not have an element_type member, return void.
+    template <typename T>
+    using get_element_type_t = typename get_element_type_helper<T>::type;
+
+    template <typename T>
+    concept has_deleter_type = requires { typename T::deleter_type; };
+
+    template <typename T>
+    struct get_deleter_type_helper
+    {
+        using type = void;
+    };
+
+    template <has_deleter_type T>
+    struct get_deleter_type_helper<T>
+    {
+        using type = typename T::deleter_type;
+    };
+
+    // Get the deleter type of a type. If it does not have a deleter_type member, return void.
+    template <typename T>
+    using get_deleter_type_t = typename get_deleter_type_helper<T>::type;
+
+    /// Matches any type that is a contiguous range of characters or convertible to string_view.
+    template <class T>
+    concept string_like = std::is_convertible_v<T, std::string_view>
+                          || (std::ranges::contiguous_range<T>
+                              && std::same_as<std::ranges::range_value_t<T>, char>);
+
+    /// Matches any type that is a string-like type or a null pointer.
+    template <class T>
+    concept string_like_or_null = mpl::string_like<T> || std::is_same_v<T, std::nullptr_t>
+                                  || std::is_same_v<T, std::nullopt_t>;
+
 }
