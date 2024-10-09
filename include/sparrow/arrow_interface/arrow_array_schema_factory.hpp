@@ -98,6 +98,24 @@ namespace sparrow
         return make_arrow_array(length, null_count, offset, std::move(value_buffers), 0, nullptr, nullptr);
     }
 
+    constexpr ArrowSchema make_primitive_arrow_schema(
+        data_type data_type,
+        std::string_view name,
+        std::optional<std::string_view> metadata,
+        std::optional<ArrowFlag> arrow_flag
+    )
+    {
+        return make_arrow_schema(
+            data_type_to_format(data_type),
+            name,
+            metadata,
+            arrow_flag,
+            0,
+            nullptr,
+            nullptr
+        );
+    }
+
     template <
         std::ranges::sized_range Keys,
         std::ranges::sized_range KeyNulls,

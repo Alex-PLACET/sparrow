@@ -20,6 +20,7 @@
 #include "sparrow/arrow_array_schema_proxy.hpp"
 #include "sparrow/buffer/dynamic_bitset.hpp"
 #include "sparrow/layout/layout_iterator.hpp"
+#include "sparrow/utils/algorithm.hpp"
 #include "sparrow/utils/nullable.hpp"
 #include "sparrow/utils/iterator.hpp"
 
@@ -34,6 +35,23 @@ namespace sparrow
         SPARROW_ASSERT_TRUE(arrow_proxy.buffers().size() > bitmap_buffer_index);
         const auto bitmap_size = arrow_proxy.length() + arrow_proxy.offset();
         return {arrow_proxy.buffers()[bitmap_buffer_index].data(), bitmap_size};
+    }
+
+    /**
+     * Resize a bitmap from an arrow proxy.
+     */
+    inline dynamic_bitset_view<uint8_t> resize_bitmap(arrow_proxy& arrow_proxy, size_t old_size, size_t new_size)
+    {
+        constexpr size_t bitmap_buffer_index = 0;
+        const size_t block_count = dynamic_bitset_base<buffer<uint8_t>>::compute_block_count(new_size);
+        arrow_proxy.resize_buffer(bitmap_buffer_index, block_count, 0xFF);
+        const size_t rounded = round_up(new_size, static_cast<size_t>(CHAR_BIT));
+        dynamic_bitset_view<uint8_t> bitmap{arrow_proxy.buffers()[bitmap_buffer_index].data(), new_size};
+        for (size_t i = old_size; i < rounded; ++i)
+        {
+            bitmap.set(i, true);
+        }
+        return bitmap;
     }
 
     /**

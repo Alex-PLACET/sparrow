@@ -14,11 +14,16 @@
 
 #pragma once
 
+#include <climits>
+#include <cstddef>
+#include <stdexcept>
+
 #include "sparrow/arrow_array_schema_proxy.hpp"
+#include "sparrow/buffer/buffer_adaptor.hpp"
 #include "sparrow/layout/array_base.hpp"
+#include "sparrow/utils/algorithm.hpp"
 #include "sparrow/utils/iterator.hpp"
 #include "sparrow/utils/nullable.hpp"
-
 
 namespace sparrow
 {
@@ -74,6 +79,8 @@ namespace sparrow
 
         using base_type::size;
 
+        void resize(size_type new_size, inner_value_type value = inner_value_type{});
+
     private:
 
         bitmap_type::iterator bitmap_begin_impl();
@@ -95,6 +102,8 @@ namespace sparrow
 
         const_value_iterator value_cbegin() const;
         const_value_iterator value_cend() const;
+        
+        void resize_data(size_type new_length, inner_value_type value);
 
         static constexpr size_type DATA_BUFFER_INDEX = 1;
         bitmap_type m_bitmap;
@@ -200,5 +209,31 @@ namespace sparrow
     auto primitive_array<T>::bitmap_begin_impl() const -> bitmap_type::const_iterator
     {
         return next(m_bitmap.begin(), storage().offset());
+    }
+
+    template <class T>
+    void primitive_array<T>::resize_data(size_type new_length, inner_value_type value)
+    {
+        const size_t new_size = new_length + static_cast<size_t>(storage().offset());
+        const size_t new_bytes_count = new_size * sizeof(inner_value_type);
+        const size_t old_length = size();
+        const size_t old_size = old_length + static_cast<size_t>(storage().offset());
+        storage().resize_buffer(DATA_BUFFER_INDEX, new_bytes_count, 0);
+        if (old_length < new_length)
+        {
+            auto private_data = static_cast<arrow_array_private_data*>(storage().array().private_data);
+            auto data_buffer = make_buffer_adaptor<T>(private_data->buffers()[DATA_BUFFER_INDEX]);
+            std::fill(sparrow::next(data_buffer.begin(), old_size), data_buffer.end(), value);
+        }
+    }
+
+    template <class T>
+    void primitive_array<T>::resize(size_type new_length, inner_value_type value)
+    {
+        const size_type new_size = new_length + static_cast<size_type>(storage().offset());
+        const size_type old_length = size();
+        resize_bitmap(storage(), old_length, new_size);
+        resize_data(new_length, value);
+        storage().set_length(new_length);
     }
 }

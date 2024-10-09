@@ -105,6 +105,8 @@ namespace sparrow
             return m_buffer;
         }
 
+        static constexpr size_type compute_block_count(size_type bits_count) noexcept;
+
     protected:
 
         constexpr dynamic_bitset_base(storage_type&& buffer, size_type size);
@@ -131,9 +133,6 @@ namespace sparrow
 
         constexpr void push_back(value_type value);
         constexpr void pop_back();
-
-        constexpr size_type compute_block_count(size_type bits_count) const noexcept;
-
 
     private:
 
@@ -541,7 +540,7 @@ namespace sparrow
     }
 
     template <random_access_range B>
-    constexpr auto dynamic_bitset_base<B>::compute_block_count(size_type bits_count) const noexcept -> size_type
+    constexpr auto dynamic_bitset_base<B>::compute_block_count(size_type bits_count) noexcept -> size_type
     {
         return bits_count / s_bits_per_block + static_cast<size_type>(bits_count % s_bits_per_block != 0);
     }

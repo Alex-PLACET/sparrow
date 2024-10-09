@@ -32,7 +32,7 @@ namespace sparrow
     using layout_type = dictionary_encoded_array<keys_type, sub_layout_type>;
     static const std::array<std::string, 7> words{{"hello", "you", "are", "not", "prepared", "!", "?"}};
 
-    arrow_proxy make_arrow_proxy()
+    inline arrow_proxy make_arrow_proxy()
     {
         constexpr std::array<size_t, 2> keys_nulls{1ULL, 5ULL};
         const std::vector<keys_type> keys{0, 0, 1, 2, 3, 4, 2, 5, 0, 1, 2};

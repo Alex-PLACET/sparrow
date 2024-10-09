@@ -126,18 +126,22 @@ namespace sparrow
          * @param flags The flags to set.
          */
         void set_flags(const std::vector<ArrowFlag>& flags);
+
         [[nodiscard]] size_t length() const;
 
         /**
-         * Set the length of the `ArrowArray`.
+         * Set the length of the `ArrowArray`. This method does not resize the buffers of the `ArrowArray`.
+         * You have to change the length before replacing/resizing the buffers to have the right sizes when
+         * calling `buffers()`.
          * @exception `arrow_proxy_exception` If the `ArrowArray` was not created with sparrow.
          * @param length The length to set.
          */
         void set_length(size_t length);
+
         [[nodiscard]] int64_t null_count() const;
 
         /**
-         * Set the null count of the `ArrowArray`.
+         * Set the null count of the `ArrowArray`. This method does not change the bitmap.
          * @exception `arrow_proxy_exception` If the `ArrowArray` was not created with sparrow.
          * @param null_count The null count to set.
          */
@@ -153,7 +157,8 @@ namespace sparrow
         [[nodiscard]] size_t n_buffers() const;
 
         /**
-         * Set the number of buffers of the `ArrowArray`.
+         * Set the number of buffers of the `ArrowArray`. Resize the buffers vector of the `ArrowArray`
+         * private data.
          * @exception `arrow_proxy_exception` If the `ArrowArray` was not created with sparrow.
          * @param n_buffers The number of buffers to set.
          */
@@ -163,7 +168,8 @@ namespace sparrow
         [[nodiscard]] std::vector<sparrow::buffer_view<uint8_t>>& buffers();
 
         /**
-         * Set the buffer at the given index.
+         * Set the buffer at the given index. You have to call the `set_length` method before calling this
+         * method to have the right sizes when calling `buffers()`.
          * @exception `arrow_proxy_exception` If the `ArrowArray` was not created with sparrow.
          * @param index The index of the buffer to set.
          * @param buffer The buffer to set.
@@ -171,12 +177,23 @@ namespace sparrow
         void set_buffer(size_t index, const buffer_view<uint8_t>& buffer);
 
         /**
-         * Set the buffer at the given index.
+         * Set the buffer at the given index. You have to call the `set_length` method before calling this
+         * method to have the right sizes when calling `buffers()`.
          * @exception `arrow_proxy_exception` If the `ArrowArray` was not created with sparrow.
          * @param index The index of the buffer to set.
          * @param buffer The buffer to set.
          */
         void set_buffer(size_t index, buffer<uint8_t>&& buffer);
+
+        /**
+         * Resize the buffer at the given index. You have to call the `set_length` method before calling this
+         * method to have the right sizes when calling `buffers()`.
+         * @exception `arrow_proxy_exception` If the `ArrowArray` was not created with sparrow.
+         * @param index The index of the buffer to resize.
+         * @param size The new size of the buffer.
+         * @param value The value to set in the new elements.
+         */
+        void resize_buffer(std::size_t index, std::size_t size, std::uint8_t value);
 
         /**
          * Add children.
@@ -238,7 +255,7 @@ namespace sparrow
         [[nodiscard]] ArrowSchema& schema();
         [[nodiscard]] const ArrowSchema& schema() const;
 
-        private:
+    private:
 
         std::variant<ArrowArray*, ArrowArray> m_array;
         std::variant<ArrowSchema*, ArrowSchema> m_schema;
@@ -277,13 +294,11 @@ namespace sparrow
         void swap(arrow_proxy& other) noexcept;
     };
 
-    inline arrow_proxy arrow_proxy::view() {
-        return arrow_proxy(
-            &array(), 
-            &schema()
-        );
+    inline arrow_proxy arrow_proxy::view()
+    {
+        return arrow_proxy(&array(), &schema());
     }
- 
+
     inline void arrow_proxy::update_buffers()
     {
         m_buffers = get_arrow_array_buffers(array(), schema());
@@ -757,6 +772,20 @@ namespace sparrow
         update_buffers();
     }
 
+    inline void arrow_proxy::resize_buffer(std::size_t index, std::size_t size, std::uint8_t value)
+    {
+        SPARROW_ASSERT_TRUE(std::cmp_less(index, n_buffers()));
+        if (!array_created_with_sparrow())
+        {
+            throw arrow_proxy_exception("Cannot resize buffer on non-sparrow created ArrowArray");
+        }
+        auto array_private_data = get_array_private_data();
+        array_private_data->resize_buffer(index, size, value);
+        array().buffers = array_private_data->buffers_ptrs<void>();
+        update_null_count();
+        update_buffers();
+    }
+
     [[nodiscard]] inline const std::vector<arrow_proxy>& arrow_proxy::children() const
     {
         return m_children;
@@ -856,8 +885,8 @@ namespace sparrow
             return;
         }
         const auto validity_index = std::distance(buffer_types.begin(), validity_it);
-        auto& validity_buffer = buffers()[static_cast<size_t>(validity_index)];
-        const dynamic_bitset_view<std::uint8_t> bitmap(validity_buffer.data(), validity_buffer.size());
+        const auto& validity_buffer = buffers()[static_cast<size_t>(validity_index)];
+        const dynamic_bitset_view<const std::uint8_t> bitmap(validity_buffer.data(), length() + offset());
         const auto null_count = bitmap.null_count();
         set_null_count(static_cast<int64_t>(null_count));
     }
