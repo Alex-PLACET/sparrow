@@ -144,7 +144,7 @@ namespace sparrow
         : base_type(std::move(proxy))
         , m_bitmap(make_simple_bitmap(storage()))
     {
-        SPARROW_ASSERT_TRUE(detail::check_primitive_data_type(storage().data_type()));
+        SPARROW_ASSERT_TRUE(storage().data_type() == arrow_traits<T>::type_id);
     }
 
     template <class T>
