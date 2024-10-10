@@ -183,7 +183,7 @@ namespace sparrow
                 CHECK_EQ(it, end);
 
                 const array_test_type ar_empty(
-                    make_primitive_arrow_proxy(std::array<T, 0>{}, std::array<bool, 0>{}, 0, "test", std::nullopt)
+                    make_primitive_arrow_proxy(std::array<T, 0>{}, std::array<uint32_t, 0>{}, 0, "test", std::nullopt)
                 );
                 CHECK_EQ(ar_empty.begin(), ar_empty.end());
             }
