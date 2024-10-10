@@ -98,7 +98,7 @@ namespace sparrow
         return make_arrow_array(length, null_count, offset, std::move(value_buffers), 0, nullptr, nullptr);
     }
 
-    constexpr ArrowSchema make_primitive_arrow_schema(
+    ArrowSchema make_primitive_arrow_schema(
         data_type data_type,
         std::string_view name,
         std::optional<std::string_view> metadata,
