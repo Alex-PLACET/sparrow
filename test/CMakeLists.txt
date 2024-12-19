@@ -107,7 +107,6 @@ else()
         junit.hpp
         junit_xml_writer.hpp
         main.cpp
-        test_allocator.cpp
         test_array_wrapper.cpp
         test_array.cpp
         test_arrow_array_schema_proxy.cpp
@@ -168,7 +167,12 @@ target_link_libraries(${test_target}
 
 set(test_target_catch2 "test_sparrow_lib_catch2")
 
-add_executable(${test_target_catch2} test_algorithm.cpp)
+set(SPARROW_CATCH2_TESTS_SOURCES
+    test_algorithm.cpp
+    test_allocator.cpp
+)
+
+add_executable(${test_target_catch2} ${SPARROW_CATCH2_TESTS_SOURCES})
 target_link_libraries(${test_target_catch2}
     PRIVATE
         sparrow

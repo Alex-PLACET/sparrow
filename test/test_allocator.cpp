@@ -17,30 +17,38 @@
 #include <numeric>
 #include <vector>
 
+#include <catch2/catch_all.hpp>
+
 #include "sparrow/buffer/allocator.hpp"
 
-#include "doctest/doctest.h"
+#if defined(__APPLE__)
+using value_semantic_id = std::tuple<std::allocator<int>>;
+using allocate_id = std::tuple<std::allocator<int>>;
+#else
+using value_semantic_id = std::tuple<std::allocator<int>, std::pmr::polymorphic_allocator<int>>;
+using allocate_id = std::tuple<std::allocator<int>, std::pmr::polymorphic_allocator<int>>;
+#endif
 
-TEST_SUITE("any_allocator")
+TEMPLATE_LIST_TEST_CASE("any_allocator", "", value_semantic_id)
 {
-    TEST_CASE_TEMPLATE_DEFINE("value semantic", A, value_semantic_id)
+    SECTION("value semantic")
     {
-        SUBCASE("constructor")
+        SECTION("constructor")
         {
             {
                 sparrow::any_allocator<int> a;
             }
             {
-                A alloc;
-                sparrow::any_allocator<typename A::value_type> a(alloc);
+                TestType alloc;
+                sparrow::any_allocator<typename TestType::value_type> a(alloc);
             }
         }
 
-        SUBCASE("copy constructor")
+        SECTION("copy constructor")
         {
-            using value_type = typename A::value_type;
+            using value_type = typename TestType::value_type;
 
-            A alloc;
+            TestType alloc;
             sparrow::any_allocator<value_type> a(alloc);
             sparrow::any_allocator<value_type> b(a);
             CHECK(a == b);
@@ -49,45 +57,32 @@ TEST_SUITE("any_allocator")
             CHECK(d == b);
         }
 
-        SUBCASE("move constructor")
+        SECTION("move constructor")
         {
-            using value_type = typename A::value_type;
+            using value_type = typename TestType::value_type;
 
-            A alloc;
+            TestType alloc;
             sparrow::any_allocator<value_type> a(alloc);
             sparrow::any_allocator<value_type> aref(a);
             sparrow::any_allocator<value_type> b(std::move(a));
-            CHECK_EQ(b, aref);
+            CHECK(b == aref);
         }
     }
+}
 
-    TEST_CASE_TEMPLATE_DEFINE("allocate / deallocate", A, allocate_id)
-    {
-        using value_type = typename A::value_type;
+TEMPLATE_LIST_TEST_CASE("allocate / deallocate", "", allocate_id)
+{
+    using value_type = typename TestType::value_type;
 
-        constexpr std::size_t n = 100;
-        std::vector<value_type> ref(n);
-        std::iota(ref.begin(), ref.end(), value_type());
+    constexpr std::size_t n = 100;
+    std::vector<value_type> ref(n);
+    std::iota(ref.begin(), ref.end(), value_type());
 
-        A alloc;
-        sparrow::any_allocator<value_type> a(alloc);
-        value_type* buf = a.allocate(n);
-        std::uninitialized_copy(ref.cbegin(), ref.cend(), buf);
-        CHECK_EQ(*buf, ref[0]);
-        CHECK_EQ(*(buf + n - 1), ref.back());
-        a.deallocate(buf, n);
-    }
-
-#if defined(__APPLE__)
-    // /usr/lib/libc++.1.dylib is missing the symbol __ZNSt3__13pmr20get_default_resourceEv, leading
-    // to an exception at runtime.
-    TEST_CASE_TEMPLATE_INVOKE(
-        value_semantic_id,
-        std::allocator<int> /*, std::pmr::polymorphic_allocator<int>*/
-    );
-    TEST_CASE_TEMPLATE_INVOKE(allocate_id, std::allocator<int> /*, std::pmr::polymorphic_allocator<int>*/);
-#else
-    TEST_CASE_TEMPLATE_INVOKE(value_semantic_id, std::allocator<int>, std::pmr::polymorphic_allocator<int>);
-    TEST_CASE_TEMPLATE_INVOKE(allocate_id, std::allocator<int>, std::pmr::polymorphic_allocator<int>);
-#endif
+    TestType alloc;
+    sparrow::any_allocator<value_type> a(alloc);
+    value_type* buf = a.allocate(n);
+    std::uninitialized_copy(ref.cbegin(), ref.cend(), buf);
+    CHECK(*buf == ref[0]);
+    CHECK(*(buf + n - 1) == ref.back());
+    a.deallocate(buf, n);
 }
