@@ -16,6 +16,7 @@
 
 #include <cstddef>
 #include <ranges>
+#include <array>
 
 #include "sparrow/arrow_array_schema_proxy.hpp"
 #include "sparrow/arrow_interface/arrow_array.hpp"
