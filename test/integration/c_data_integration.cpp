@@ -155,12 +155,55 @@ sparrow::array floatingpoint_from_json(const nlohmann::json& array, const nlohma
     throw std::runtime_error("Invalid precision");
 }
 
+// sparrow::int128_t string_to_int128(const std::string& str)
+// {
+//     if (str.empty())
+//     {
+//         throw std::invalid_argument("Empty string");
+//     }
+
+//     // Handle negative numbers
+//     bool negative = str[0] == '-';
+//     size_t start_idx = negative ? 1 : 0;
+
+//     if (start_idx >= str.length())
+//     {
+//         throw std::invalid_argument("Invalid number format");
+//     }
+
+//     sparrow::int128_t result = 0;
+//     for (size_t i = start_idx; i < str.length(); ++i)
+//     {
+//         if (!std::isdigit(str[i]))
+//         {
+//             throw std::invalid_argument("Invalid character in string");
+//         }
+
+//         // Check for overflow before multiplying
+//         if (result > (sparrow::int128_t)((std::numeric_limits<sparrow::int128_t>::max)() / 10))
+//         {
+//             throw std::overflow_error("Number too large for int128_t");
+//         }
+
+//         result = result * 10 + (str[i] - '0');
+
+//         // Check for overflow after adding
+//         if (result < 0)
+//         {
+//             throw std::overflow_error("Number too large for int128_t");
+//         }
+//     }
+
+//     return negative ? -result : result;
+// }
+
 // sparrow::array decimal_from_json(const nlohmann::json& array, const nlohmann::json& schema)
 // {
 //     const uint32_t precision = schema.at("type").at("precision").get<uint32_t>();
 //     const uint32_t scale = schema.at("type").at("scale").get<uint32_t>();
 //     const std::string name = schema.at("name").get<std::string>();
 
+//     const std::vector<sparrow::int256_t> data = array.at(DATA).get<std::vector<sparrow::int128_t>>();
 
 //     if (precision == 32)
 //     {
@@ -168,6 +211,7 @@ sparrow::array floatingpoint_from_json(const nlohmann::json& array, const nlohma
 //         {
 //             sparrow::decimal_32_array
 //             {
+//                 array.at(DATA).get<std::vector<sparrow::decimal32>>(), precision, scale, name
 //             }
 //         }
 //     }
@@ -180,6 +224,16 @@ sparrow::array floatingpoint_from_json(const nlohmann::json& array, const nlohma
 
 //     return sparrow::array{sparrow::fixed{array.at(DATA).get<std::vector<sparrow::fixed_size_binary>>(),
 //     name}};
+// }
+
+// sparrow::array fixedsizelist_from_json(const nlohmann::json& array, const nlohmann::json& schema)
+// {
+//     const std::string name = schema.at("name").get<std::string>();
+//     const std::size_t list_size = schema.at("type").at("listSize").get<std::size_t>();
+
+//     return sparrow::array{
+//         sparrow::fixed_sized_list_array{array.at(DATA).get<std::vector<sparrow::fixed_size_list>>(), name}
+//     };
 // }
 
 void read_schema_from_json(const nlohmann::json& data)
