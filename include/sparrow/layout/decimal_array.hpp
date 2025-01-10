@@ -24,7 +24,6 @@
 #include "sparrow/buffer/u8_buffer.hpp"
 #include "sparrow/layout/array_bitmap_base.hpp"
 #include "sparrow/layout/layout_utils.hpp"
-#include "sparrow/layout/nested_value_types.hpp"
 #include "sparrow/utils/decimal.hpp"
 #include "sparrow/utils/functor_index_iterator.hpp"
 #include "sparrow/utils/nullable.hpp"

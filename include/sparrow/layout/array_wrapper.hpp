@@ -19,7 +19,6 @@
 
 #include "sparrow/arrow_array_schema_proxy.hpp"
 #include "sparrow/layout/array_access.hpp"
-#include "sparrow/types/data_traits.hpp"
 #include "sparrow/utils/memory.hpp"
 
 namespace sparrow

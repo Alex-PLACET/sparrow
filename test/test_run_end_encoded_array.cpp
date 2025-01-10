@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "sparrow/array.hpp"
-#include "sparrow/layout/dispatch.hpp"
 #include "sparrow/layout/primitive_array.hpp"
 #include "sparrow/layout/run_end_encoded_layout/run_end_encoded_array.hpp"
 #include "sparrow/utils/nullable.hpp"
@@ -185,7 +183,7 @@ namespace sparrow
                 }
             }
 
-            SUBCASE("consitency")
+            SUBCASE("consistency")
             {
                 test::generic_consistency_test(rle_array);
             }

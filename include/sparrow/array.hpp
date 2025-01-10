@@ -22,7 +22,7 @@ namespace sparrow
     template <layout A>
         requires(not std::is_lvalue_reference_v<A>)
     array::array(A&& a)
-        : p_array(new array_wrapper_impl<A>(std::move(a)))
+        : p_array(new array_wrapper_impl<A>(std::forward<A>(a)))
     {
     }
 
@@ -76,13 +76,13 @@ namespace sparrow
     }
 
     template <layout_or_array A>
-    ArrowArray extract_arrow_array(A&& a)
+    ArrowArray extract_arrow_array(const A& a)
     {
         return detail::array_access::get_arrow_proxy(a).extract_array();
     }
 
     template <layout_or_array A>
-    ArrowSchema extract_arrow_schema(A&& a)
+    ArrowSchema extract_arrow_schema(const A& a)
     {
         return detail::array_access::get_arrow_proxy(a).extract_schema();
     }
