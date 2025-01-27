@@ -34,35 +34,6 @@ namespace sparrow
 
     TEST_SUITE("duration_array")
     {
-        TEST_CASE("test")
-        {
-            const std::vector<uint32_t> v{1, 2, 3};
-            const auto duration_range = std::span<const std::chrono::duration<int>>(
-                reinterpret_cast<const std::chrono::duration<int>*>(v.data()),
-                v.size()
-            );
-            for (auto i : duration_range)
-            {
-                std::cout << i << std::endl;
-            }
-
-            const std::vector<std::chrono::duration<uint32_t, std::milli>> v2{
-                std::chrono::duration<uint32_t, std::milli>(1),
-                std::chrono::duration<uint32_t, std::milli>(2),
-                std::chrono::duration<uint32_t, std::milli>(3)
-            };
-
-            const auto int_range = std::span<const uint32_t>(
-                reinterpret_cast<const uint32_t*>(v2.data()),
-                v2.size()
-            );
-
-            for (auto i : int_range)
-            {
-                std::cout << i << std::endl;
-            }
-        }
-
         TEST_CASE_TEMPLATE_DEFINE("", T, duration_array_id)
         {
             const auto input_values = make_nullable_values<T>(10);
