@@ -17,6 +17,7 @@
 #include <chrono>
 #include <concepts>
 
+#include "sparrow/layout/temporal/interval_concepts.hpp"
 #include "sparrow/types/data_type.hpp"
 #include "sparrow/utils/nullable.hpp"
 #include "sparrow/utils/vector_view.hpp"
@@ -173,6 +174,30 @@ namespace sparrow
         static constexpr data_type type_id = data_type::TIMESTAMP_NANOSECONDS;
         using value_type = timestamp<std::chrono::nanoseconds>;
         using const_reference = timestamp<std::chrono::nanoseconds>;
+    };
+
+    template <>
+    struct arrow_traits<std::chrono::months>
+    {
+        static constexpr data_type type_id = data_type::INTERVAL_MONTHS;
+        using value_type = std::chrono::months;
+        using const_reference = const std::chrono::months&;
+    };
+
+    template <>
+    struct arrow_traits<days_time_interval>
+    {
+        static constexpr data_type type_id = data_type::INTERVAL_DAYS_TIME;
+        using value_type = days_time_interval;
+        using const_reference = const days_time_interval&;
+    };
+
+    template <>
+    struct arrow_traits<month_day_nanoseconds_interval>
+    {
+        static constexpr data_type type_id = data_type::INTERVAL_MONTHS_DAYS_NANOSECONDS;
+        using value_type = month_day_nanoseconds_interval;
+        using const_reference = const month_day_nanoseconds_interval&;
     };
 
     namespace detail

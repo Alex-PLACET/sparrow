@@ -130,11 +130,13 @@ else()
         test_decimal.cpp
         test_dictionary_encoded_array.cpp
         test_dispatch.cpp
+        test_duration_array.cpp
         test_dynamic_bitset_view.cpp
         test_dynamic_bitset.cpp
         test_fixed_width_binary_array.cpp
         test_format.cpp
         test_high_level_constructors.cpp
+        test_interval_array.cpp
         test_iterator.cpp
         test_list_array.cpp
         test_list_value.cpp
@@ -145,7 +147,6 @@ else()
         test_null_array.cpp
         test_nullable.cpp
         test_primitive_array.cpp
-        test_duration_array.cpp
         test_ranges.cpp
         test_record_batch.cpp
         test_repeat_container.cpp
