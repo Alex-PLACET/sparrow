@@ -29,6 +29,7 @@
 #include "sparrow/layout/fixed_width_binary_layout/fixed_width_binary_array_utils.hpp"
 #include "sparrow/layout/fixed_width_binary_layout/fixed_width_binary_reference.hpp"
 #include "sparrow/layout/layout_utils.hpp"
+#include "sparrow/layout/temporal/duration_concepts.hpp"
 #include "sparrow/types/data_traits.hpp"
 #include "sparrow/utils/contracts.hpp"
 #include "sparrow/utils/repeat_container.hpp"
@@ -250,6 +251,8 @@ namespace sparrow
         size_t m_element_size = 0;
 
         friend class fixed_width_binary_reference<self_type>;
+        template <duration_type>
+        friend class duration_array;
         friend const_value_iterator;
         friend base_type;
         friend base_type::base_type;
