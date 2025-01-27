@@ -42,6 +42,11 @@ namespace sparrow
     template <duration_type T>
     class duration_array;
 
+    using duration_seconds_array = duration_array<std::chrono::seconds>;
+    using duration_milliseconds_array = duration_array<std::chrono::milliseconds>;
+    using duration_microseconds_array = duration_array<std::chrono::microseconds>;
+    using duration_nanoseconds_array = duration_array<std::chrono::nanoseconds>;
+
     template <duration_type T>
     struct array_inner_types<duration_array<T>> : array_inner_types_base
     {
