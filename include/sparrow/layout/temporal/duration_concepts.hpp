@@ -8,29 +8,23 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or mplied.
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
 #pragma once
 
-#include "sparrow/types/data_type.hpp"
+#include <chrono>
+
 #include "sparrow/utils/mp_utils.hpp"
 
 namespace sparrow
 {
-    using duration_types_t = mpl::typelist<
-        // std::chrono::duration<int32_t>,
-        // std::chrono::duration<int32_t, std::milli>,
-        std::chrono::seconds,
-        std::chrono::milliseconds,
-        std::chrono::microseconds,
-        std::chrono::nanoseconds
-        // std::chrono::months,
-        // std::chrono::day
-        >;
+    using duration_types_t = mpl::
+        typelist<std::chrono::seconds, std::chrono::milliseconds, std::chrono::microseconds, std::chrono::nanoseconds>;
 
     static constexpr duration_types_t duration_types;
     template <typename T>
     concept duration_type = mpl::contains<T>(duration_types);
+
 }  // namespace sparrow

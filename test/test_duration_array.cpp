@@ -12,12 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <chrono>
-#include <cstdint>
-#include <iostream>
-#include <ratio>
-#include <span>
-
 #include "sparrow/layout/temporal/duration_array.hpp"
 
 #include "doctest/doctest.h"
