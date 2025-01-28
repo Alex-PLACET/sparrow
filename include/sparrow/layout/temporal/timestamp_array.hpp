@@ -290,10 +290,6 @@ namespace sparrow
 
         [[nodiscard]] static const date::time_zone* get_timezone(const arrow_proxy& proxy);
 
-        static const date::time_zone* get_timezone(const arrow_proxy& proxy);
-
-        [[nodiscard]] static const date::time_zone* get_timezone(const arrow_proxy& proxy);
-
         values_layout m_values_layout;
         const date::time_zone* m_timezone;
 
