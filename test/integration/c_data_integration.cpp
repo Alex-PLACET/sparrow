@@ -84,16 +84,16 @@ sparrow::array struct_array_from_json(const nlohmann::json& array, const nlohman
     const auto children_json = get_children(schema, array);
 
     std::vector<sparrow::array> children_array;
-    children.reserve(schema.at("children").size());
-    for (const auto& child : schema.at("children"))
+    children_array.reserve(schema.at("children").size());
+    for (const auto& [child_array, child_schema] : children_json)
     {
-        children.push_back(build_array_from_json(array.at(child.at("name").get<std::string>()), child));
+        children_array.push_back(build_array_from_json(child_array, child_schema));
     }
 
     const std::vector<bool> validity = array.at(VALIDITY).get<std::vector<bool>>();
 
     sparrow::struct_array ar{
-        std::move(children),
+        std::move(children_array),
         std::move(validity),
         name,
     };
