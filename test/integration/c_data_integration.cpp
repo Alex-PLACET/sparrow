@@ -32,6 +32,8 @@
 #include "sparrow/record_batch.hpp"
 #include "sparrow/utils/contracts.hpp"
 
+sparrow::array build_array_from_json(const nlohmann::json& array, const nlohmann::json& schema);
+
 void read_schema_field(const nlohmann::json& data)
 {
     SPARROW_ASSERT_TRUE(data.is_object());
@@ -76,7 +78,7 @@ sparrow::array build_struct_array_from_json(const nlohmann::json& array, const n
 
 // }
 
-sparrow::array int_from_json(const nlohmann::json& array, const nlohmann::json& schema)
+sparrow::array primitive_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
 {
     const std::string type = schema.at("type").at("name").get<std::string>();
     if (type != "int")
@@ -387,6 +389,7 @@ sparrow::array sparse_union_array_from_json(const nlohmann::json& array, const n
         type_ids_values.end()
     };
 
+
     std::vector<bool> validity = array.at(VALIDITY).get < std::vector<bool>();
     const std::vector<nlohmann::json> children = schema.at("children").get<std::vector<nlohmann::json>>();
     std::vector<sparrow::array> arrays;
@@ -398,15 +401,15 @@ sparrow::array sparse_union_array_from_json(const nlohmann::json& array, const n
     return sparrow::array{sparrow::union_array{type_ids, offsets, arrays, validity, name}};
 }
 
-// sparrow::array fixedsizelist_from_json(const nlohmann::json& array, const nlohmann::json& schema)
-// {
-//     const std::string name = schema.at("name").get<std::string>();
-//     const std::size_t list_size = schema.at("type").at("listSize").get<std::size_t>();
+sparrow::array fixedsizelist_from_json(const nlohmann::json& array, const nlohmann::json& schema)
+{
+    const std::string name = schema.at("name").get<std::string>();
+    const std::size_t list_size = schema.at("type").at("listSize").get<std::size_t>();
 
-//     return sparrow::array{
-//         sparrow::fixed_sized_list_array{array.at(DATA).get<std::vector<sparrow::fixed_size_list>>(), name}
-//     };
-// }
+    return sparrow::array{
+        sparrow::fixed_sized_list_array{array.at(DATA).get<std::vector<sparrow::fixed_size_list>>(), name}
+    };
+}
 
 void read_schema_from_json(const nlohmann::json& data)
 {
@@ -442,7 +445,59 @@ void read_schema_from_json(const nlohmann::json& data)
 
 sparrow::array build_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
 {
-    const std::string type = schema.at("type").get<std::string>();
+    const std::string type = schema.at("type").at("name").get<std::string>();
+    if (type == "null")
+    {
+        return build_null_array_from_json(array, schema);
+    }
+    else if (type == "struct")
+    {
+        return build_struct_array_from_json(array, schema);
+    }
+    else if (type == "int")
+    {
+        return primitive_array_from_json(array, schema);
+    }
+    else if (type == "floatingpoint")
+    {
+        return floating_point_from_json(array, schema);
+    }
+    else if (type == "decimal")
+    {
+        return decimal_from_json(array, schema);
+    }
+    else if (type == "fixedsizebinary")
+    {
+        return fixedsizebinary_from_json(array, schema);
+    }
+    else if (type == "utf8")
+    {
+        return variable_size_binary_from_json(array, schema);
+    }
+    else if (type == "timestamp")
+    {
+        return timestamp_array_from_json(array, schema);
+    }
+    else if (type == "duration")
+    {
+        return duration_array_from_json(array, schema);
+    }
+    else if (type == "interval")
+    {
+        return interval_array_from_json(array, schema);
+    }
+    else if (type == "union")
+    {
+        return union_array_from_json(array, schema);
+    }
+    else if (type == "sparse_union")
+    {
+        return sparse_union_array_from_json(array, schema);
+    }
+    else if (type == "fixedsizelist")
+    {
+        return fixedsizelist_from_json(array, schema);
+    }
     return sparrow::array{};
 }
 
