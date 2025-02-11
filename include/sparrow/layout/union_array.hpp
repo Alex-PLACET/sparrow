@@ -29,7 +29,6 @@
 #include "sparrow/utils/memory.hpp"
 #include "sparrow/utils/mp_utils.hpp"
 
-
 namespace sparrow
 {
     class dense_union_array;
@@ -220,9 +219,10 @@ namespace sparrow
         static auto create_proxy(
             std::vector<array>&& children,
             type_id_buffer_type&& element_type,
-            TYPE_MAPPING&& type_mapping = TYPE_MAPPING{}
+            TYPE_MAPPING&& type_mapping = TYPE_MAPPING{},
+            std::optional<std::string_view> name = std::nullopt,
+            std::optional<std::string_view> metadata = std::nullopt
         ) -> arrow_proxy;
-
 
     private:
 
@@ -606,7 +606,9 @@ namespace sparrow
     auto sparse_union_array::create_proxy(
         std::vector<array>&& children,
         type_id_buffer_type&& element_type,
-        TYPE_MAPPING&& child_index_to_type_id
+        TYPE_MAPPING&& child_index_to_type_id,
+        std::optional<std::string_view> name,
+        std::optional<std::string_view> metadata
     ) -> arrow_proxy
     {
         const auto n_children = children.size();
@@ -647,8 +649,8 @@ namespace sparrow
 
         ArrowSchema schema = make_arrow_schema(
             format,
-            std::nullopt,  // name
-            std::nullopt,  // metadata
+            name,          // name
+            metadata,      // metadata
             std::nullopt,  // flags,
             static_cast<int64_t>(n_children),
             child_schemas,  // children

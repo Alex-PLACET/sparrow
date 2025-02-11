@@ -29,40 +29,68 @@
 #include "sparrow/layout/temporal/duration_array.hpp"
 #include "sparrow/layout/temporal/interval_array.hpp"
 #include "sparrow/layout/temporal/timestamp_array.hpp"
+#include "sparrow/layout/union_array.hpp"
 #include "sparrow/record_batch.hpp"
 #include "sparrow/utils/contracts.hpp"
 
+
 sparrow::array build_array_from_json(const nlohmann::json& array, const nlohmann::json& schema);
 
-void read_schema_field(const nlohmann::json& data)
+sparrow::array null_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
 {
-    SPARROW_ASSERT_TRUE(data.is_object());
-    const std::string name = data.at("name").get<std::string>();
-    const bool nullable = data.at("nullable").get<bool>();
-    const auto type = data.at("type");
-}
-
-sparrow::array build_null_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
-{
-    // std::optional<std::string> metadata = schema.at("metadata").get<std::optional<std::string>>();
-    sparrow::null_array ar{array.at("count").get<std::size_t>(), array.at("name")};
+    const std::string type = schema.at("type").at("name").get<std::string>();
+    if (type != "null")
+    {
+        throw std::runtime_error("Invalid type");
+    }
+    const std::string name = schema.at("name").get<std::string>();
+    const std::size_t count = array.at("count").get<std::size_t>();
+    sparrow::null_array ar{count, name};
     return sparrow::array{std::move(ar)};
 }
 
 static constexpr std::string_view VALIDITY = "VALIDITY";
 static constexpr std::string_view DATA = "DATA";
 
-sparrow::array build_struct_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
+std::vector<std::pair<const nlohmann::json&, const nlohmann::json&>>
+get_children(const nlohmann::json& array, const nlohmann::json& schema)
 {
-    std::vector<sparrow::array> children;
-    children.reserve(schema.at("children").size());
-    // TODO
+    std::vector<std::pair<const nlohmann::json&, const nlohmann::json&>> children;
+    const auto names = schema.at("children")
+                       | std::views::transform(
+                           [](const nlohmann::json& child)
+                           {
+                               return child.at("name").get<std::string>();
+                           }
+                       );
+    for (const auto& name : names)
+    {
+        const auto child_array = array.at("children").at(name);
+        const auto child_schema = schema.at("children").at(name);
+        children.emplace_back(child_array, child_schema);
+    }
+    return children;
+}
 
-    std::vector<bool> validity;
-    validity.reserve(array.at("count").get<std::size_t>());
-    array.at(VALIDITY).get_to(validity);
-
+sparrow::array struct_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
+{
+    const std::string type = schema.at("type").at("name").get<std::string>();
+    if (type != "struct")
+    {
+        throw std::runtime_error("Invalid type");
+    }
     const std::string name = schema.at("name").get<std::string>();
+
+    const auto children_json = get_children(schema, array);
+
+    std::vector<sparrow::array> children_array;
+    children.reserve(schema.at("children").size());
+    for (const auto& child : schema.at("children"))
+    {
+        children.push_back(build_array_from_json(array.at(child.at("name").get<std::string>()), child));
+    }
+
+    const std::vector<bool> validity = array.at(VALIDITY).get<std::vector<bool>>();
 
     sparrow::struct_array ar{
         std::move(children),
@@ -218,22 +246,28 @@ sparrow::array floating_point_from_json(const nlohmann::json& array, const nlohm
 
 sparrow::array decimal_from_json(const nlohmann::json& array, const nlohmann::json& schema)
 {
-    const uint32_t precision = schema.at("type").at("precision").get<uint32_t>();
-    const uint32_t scale = schema.at("type").at("scale").get<uint32_t>();
-    const std::string name = schema.at("name").get<std::string>();
-
-    const std::vector<sparrow::int256_t> data = array.at(DATA).get<std::vector<sparrow::int128_t>>();
-
-    if (precision == 32)
+    const std::string type = schema.at("type").at("name").get<std::string>();
+    if (type != "decimal")
     {
-        return sparrow::array
-        {
-            sparrow::decimal_32_array
-            {
-                array.at(DATA).get<std::vector<sparrow::decimal32>>(), precision, scale, name
-            }
-        }
+        throw std::runtime_error("Invalid type");
     }
+    throw std::runtime_error("Not implemented");
+    // const uint32_t precision = schema.at("type").at("precision").get<uint32_t>();
+    // const uint32_t scale = schema.at("type").at("scale").get<uint32_t>();
+    // const std::string name = schema.at("name").get<std::string>();
+
+    // const std::vector<sparrow::int256_t> data = array.at(DATA).get<std::vector<sparrow::int128_t>>();
+
+    // if (precision == 32)
+    // {
+    //     return sparrow::array
+    //     {
+    //         sparrow::decimal_32_array
+    //         {
+    //             array.at(DATA).get<std::vector<sparrow::decimal32>>(), precision, scale, name
+    //         }
+    //     }
+    // }
 };
 
 sparrow::array fixedsizebinary_from_json(const nlohmann::json& array, const nlohmann::json& schema)
@@ -359,17 +393,6 @@ sparrow::array interval_array_from_json(const nlohmann::json& array, const nlohm
     }
 }
 
-sparrow::array union_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
-{
-    const std::string type = schema.at("type").at("name").get<std::string>();
-    if (type != "union")
-    {
-        throw std::runtime_error("Invalid type");
-    }
-
-    const std::string mode = schema.at("type").at("mode").get<std::string>();
-}
-
 sparrow::array sparse_union_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
 {
     const std::string type = schema.at("type").at("name").get<std::string>();
@@ -384,13 +407,7 @@ sparrow::array sparse_union_array_from_json(const nlohmann::json& array, const n
     }
     const std::string name = schema.at("name").get<std::string>();
     const std::vector<uint8_t> type_ids_values = schema.at("type").at("typeIds").get<std::vector<uint8_t>>();
-    const sparrow::sparse_union_array::type_id_buffer_type type_ids{
-        type_ids_values.begin(),
-        type_ids_values.end()
-    };
-
-
-    std::vector<bool> validity = array.at(VALIDITY).get < std::vector<bool>();
+    const sparrow::sparse_union_array::type_id_buffer_type type_ids{type_ids_values};
     const std::vector<nlohmann::json> children = schema.at("children").get<std::vector<nlohmann::json>>();
     std::vector<sparrow::array> arrays;
     arrays.reserve(children.size());
@@ -398,7 +415,34 @@ sparrow::array sparse_union_array_from_json(const nlohmann::json& array, const n
     {
         arrays.emplace_back(build_array_from_json(array, child));
     }
-    return sparrow::array{sparrow::union_array{type_ids, offsets, arrays, validity, name}};
+    return sparrow::array{sparrow::sparse_union_array{std::move(arrays), std::vector<std::uint8_t>{}}};
+}
+
+sparrow::array dense_union_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
+{
+    throw std::runtime_error("Not implemented");
+}
+
+sparrow::array union_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
+{
+    const std::string type = schema.at("type").at("name").get<std::string>();
+    if (type != "union")
+    {
+        throw std::runtime_error("Invalid type");
+    }
+    const std::string mode = schema.at("type").at("mode").get<std::string>();
+    if (mode == "dense")
+    {
+        return dense_union_array_from_json(array, schema);
+    }
+    else if (mode == "sparse")
+    {
+        return sparse_union_array_from_json(array, schema);
+    }
+    else
+    {
+        throw std::runtime_error("Invalid mode");
+    }
 }
 
 sparrow::array fixedsizelist_from_json(const nlohmann::json& array, const nlohmann::json& schema)
@@ -448,11 +492,11 @@ sparrow::array build_array_from_json(const nlohmann::json& array, const nlohmann
     const std::string type = schema.at("type").at("name").get<std::string>();
     if (type == "null")
     {
-        return build_null_array_from_json(array, schema);
+        return null_array_from_json(array, schema);
     }
     else if (type == "struct")
     {
-        return build_struct_array_from_json(array, schema);
+        return struct_array_from_json(array, schema);
     }
     else if (type == "int")
     {
