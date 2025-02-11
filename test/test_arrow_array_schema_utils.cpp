@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <array>
 #include <cstddef>
 
 #include "sparrow/arrow_interface/arrow_array_schema_utils.hpp"
 #include "sparrow/buffer/buffer.hpp"
 
 #include "doctest/doctest.h"
+
 
 TEST_SUITE("C Data Interface")
 {

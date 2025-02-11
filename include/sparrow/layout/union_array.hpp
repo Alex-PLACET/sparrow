@@ -14,6 +14,8 @@
 
 #pragma once
 
+#include <array>
+
 #include "sparrow/array_api.hpp"
 #include "sparrow/array_factory.hpp"
 #include "sparrow/config/config.hpp"
@@ -26,6 +28,7 @@
 #include "sparrow/utils/functor_index_iterator.hpp"
 #include "sparrow/utils/memory.hpp"
 #include "sparrow/utils/mp_utils.hpp"
+
 
 namespace sparrow
 {
