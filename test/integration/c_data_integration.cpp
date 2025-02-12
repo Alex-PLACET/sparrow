@@ -40,6 +40,7 @@ sparrow::array build_array_from_json(const nlohmann::json& array, const nlohmann
 
 static constexpr std::string_view VALIDITY = "VALIDITY";
 static constexpr std::string_view DATA = "DATA";
+static constexpr std::string_view OFFSET = "OFFSET";
 
 std::vector<std::pair<const nlohmann::json&, const nlohmann::json&>>
 get_children(const nlohmann::json& array, const nlohmann::json& schema)
@@ -61,16 +62,16 @@ get_children(const nlohmann::json& array, const nlohmann::json& schema)
     return children;
 }
 
-auto get_children_arrays(const nlohmann::json& array, const nlohmann::json& schema)
+std::vector<sparrow::array> get_children_arrays(const nlohmann::json& array, const nlohmann::json& schema)
 {
     const auto children_json = get_children(array, schema);
-    return children_json
-           | std::views::transform(
-               [](const auto& [child_array, child_schema])
-               {
-                   return build_array_from_json(child_array, child_schema);
-               }
-           );
+    std::vector<sparrow::array> children;
+    children.reserve(children_json.size());
+    for (const auto& [child_array, child_schema] : children_json)
+    {
+        children.push_back(build_array_from_json(child_array, child_schema));
+    }
+    return children;
 }
 
 void check_type(const nlohmann::json& array, const nlohmann::json& schema, const std::string& type)
@@ -96,7 +97,6 @@ sparrow::array struct_array_from_json(const nlohmann::json& array, const nlohman
     check_type(array, schema, "struct");
     const std::string name = schema.at("name").get<std::string>();
     auto validity = array.at(VALIDITY).get<std::vector<bool>>();
-
     sparrow::struct_array ar{
         get_children_arrays(array, schema),
         std::move(validity),
@@ -109,9 +109,9 @@ sparrow::array list_array_from_json(const nlohmann::json& array, const nlohmann:
 {
     check_type(array, schema, "list");
     const std::string name = schema.at("name").get<std::string>();
-    const auto children_json = get_children(array, schema);
     auto validity = array.at(VALIDITY).get<std::vector<bool>>();
-    sparrow::list_array ar{get_children_arrays(array, schema)[0], std::move(validity), name};
+    auto offsets = array.at(OFFSET).get<std::vector<int32_t>>();
+    sparrow::list_array ar{get_children_arrays(array, schema)[0], offsets, std::move(validity), name};
     return sparrow::array{std::move(ar)};
 }
 
@@ -119,9 +119,15 @@ sparrow::array large_list_array_from_json(const nlohmann::json& array, const nlo
 {
     check_type(array, schema, "largelist");
     const std::string name = schema.at("name").get<std::string>();
-    const auto children_json = get_children(array, schema);
     auto validity = array.at(VALIDITY).get<std::vector<bool>>();
-    sparrow::big_list_array ar{get_children_arrays(array, schema)[0], std::move(validity), name};
+    auto offsets = array.at(OFFSET).get<std::vector<std::string_view>>()
+                   | std::views::transform(
+                       [](const std::string_view offset)
+                       {
+                           return std::stoull(std::string(offset));
+                       }
+                   );
+    sparrow::big_list_array ar{get_children_arrays(array, schema)[0], offsets, std::move(validity), name};
     return sparrow::array{std::move(ar)};
 }
 
@@ -129,7 +135,6 @@ sparrow::array list_view_array_from_json(const nlohmann::json& array, const nloh
 {
     check_type(array, schema, "listview");
     const std::string name = schema.at("name").get<std::string>();
-    const auto children_json = get_children(array, schema);
     auto validity = array.at(VALIDITY).get<std::vector<bool>>();
     sparrow::list_view_array ar{get_children_arrays(array, schema)[0], std::move(validity), name};
     return sparrow::array{std::move(ar)};
