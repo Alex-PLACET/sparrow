@@ -26,6 +26,7 @@
 #include "sparrow/layout/primitive_array.hpp"
 #include "sparrow/layout/run_end_encoded_layout/run_end_encoded_array.hpp"
 #include "sparrow/layout/struct_layout/struct_array.hpp"
+#include "sparrow/layout/temporal/date_array.hpp"
 #include "sparrow/layout/temporal/duration_array.hpp"
 #include "sparrow/layout/temporal/interval_array.hpp"
 #include "sparrow/layout/temporal/timestamp_array.hpp"
@@ -375,6 +376,26 @@ sparrow::array string_view_from_json(const nlohmann::json& array, const nlohmann
     return sparrow::array{sparrow::string_view_array{data, validity, name}};
 }
 
+sparrow::array date_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
+{
+    const std::string type = schema.at("type").at("name").get<std::string>();
+    if (type != "date")
+    {
+        throw std::runtime_error("Invalid type");
+    }
+
+    const std::string name = schema.at("name").get<std::string>();
+    const std::string unit = schema.at("type").at("unit").get<std::string>();
+    if (unit == "DAY")
+    {
+        return sparrow::date_days_array{};
+    }
+
+    const std::vector<int32_t> data = array.at(DATA).get<std::vector<int32_t>>();
+    const std::vector<bool> validity = array.at(VALIDITY).get<std::vector<bool>>();
+    return sparrow::array{sparrow::date_array{data, validity, name}};
+}
+
 sparrow::array timestamp_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
 {
     const std::string type = schema.at("type").at("name").get<std::string>();
@@ -630,6 +651,10 @@ sparrow::array build_array_from_json(const nlohmann::json& array, const nlohmann
     else if (type == "decimal")
     {
         return decimal_from_json(array, schema);
+    }
+    else if (type == "date")
+    {
+        return date
     }
     else if (type == "fixedsizelist")
     {
