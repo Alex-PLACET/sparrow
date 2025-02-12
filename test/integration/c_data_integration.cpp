@@ -38,19 +38,6 @@
 
 sparrow::array build_array_from_json(const nlohmann::json& array, const nlohmann::json& schema);
 
-sparrow::array null_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
-{
-    const std::string type = schema.at("type").at("name").get<std::string>();
-    if (type != "null")
-    {
-        throw std::runtime_error("Invalid type");
-    }
-    const std::string name = schema.at("name").get<std::string>();
-    const std::size_t count = array.at("count").get<std::size_t>();
-    sparrow::null_array ar{count, name};
-    return sparrow::array{std::move(ar)};
-}
-
 static constexpr std::string_view VALIDITY = "VALIDITY";
 static constexpr std::string_view DATA = "DATA";
 
@@ -86,15 +73,29 @@ auto get_children_arrays(const nlohmann::json& array, const nlohmann::json& sche
            );
 }
 
-sparrow::array struct_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
+void check_type(const nlohmann::json& array, const nlohmann::json& schema, const std::string& type)
 {
-    const std::string type = schema.at("type").at("name").get<std::string>();
-    if (type != "struct")
+    const std::string schema_type = schema.at("type").at("name").get<std::string>();
+    if (schema_type != type)
     {
         throw std::runtime_error("Invalid type");
     }
+}
+
+sparrow::array null_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
+{
+    check_type(array, schema, "null");
     const std::string name = schema.at("name").get<std::string>();
-    std::vector<bool> validity = array.at(VALIDITY).get<std::vector<bool>>();
+    const std::size_t count = array.at("count").get<std::size_t>();
+    sparrow::null_array ar{count, name};
+    return sparrow::array{std::move(ar)};
+}
+
+sparrow::array struct_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
+{
+    check_type(array, schema, "struct");
+    const std::string name = schema.at("name").get<std::string>();
+    auto validity = array.at(VALIDITY).get<std::vector<bool>>();
 
     sparrow::struct_array ar{
         get_children_arrays(array, schema),
@@ -106,92 +107,80 @@ sparrow::array struct_array_from_json(const nlohmann::json& array, const nlohman
 
 sparrow::array list_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
 {
-    const std::string type = schema.at("type").at("name").get<std::string>();
-    if (type != "list")
-    {
-        throw std::runtime_error("Invalid type");
-    }
+    check_type(array, schema, "list");
     const std::string name = schema.at("name").get<std::string>();
     const auto children_json = get_children(array, schema);
-    std::vector<bool> validity = array.at(VALIDITY).get<std::vector<bool>>();
+    auto validity = array.at(VALIDITY).get<std::vector<bool>>();
     sparrow::list_array ar{get_children_arrays(array, schema)[0], std::move(validity), name};
     return sparrow::array{std::move(ar)};
 }
 
 sparrow::array large_list_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
 {
-    const std::string type = schema.at("type").at("name").get<std::string>();
-    if (type != "large_list")
-    {
-        throw std::runtime_error("Invalid type");
-    }
+    check_type(array, schema, "largelist");
     const std::string name = schema.at("name").get<std::string>();
     const auto children_json = get_children(array, schema);
-    std::vector<bool> validity = array.at(VALIDITY).get<std::vector<bool>>();
+    auto validity = array.at(VALIDITY).get<std::vector<bool>>();
     sparrow::big_list_array ar{get_children_arrays(array, schema)[0], std::move(validity), name};
     return sparrow::array{std::move(ar)};
 }
 
 sparrow::array list_view_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
 {
-    const std::string type = schema.at("type").at("name").get<std::string>();
-    if (type != "list_view")
-    {
-        throw std::runtime_error("Invalid type");
-    }
+    check_type(array, schema, "listview");
     const std::string name = schema.at("name").get<std::string>();
     const auto children_json = get_children(array, schema);
-    std::vector<bool> validity = array.at(VALIDITY).get<std::vector<bool>>();
+    auto validity = array.at(VALIDITY).get<std::vector<bool>>();
     sparrow::list_view_array ar{get_children_arrays(array, schema)[0], std::move(validity), name};
     return sparrow::array{std::move(ar)};
 }
 
 sparrow::array large_list_view_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
 {
-    const std::string type = schema.at("type").at("name").get<std::string>();
-    if (type != "large_list_view")
-    {
-        throw std::runtime_error("Invalid type");
-    }
+    check_type(array, schema, "largelistview");
     const std::string name = schema.at("name").get<std::string>();
     const auto children_json = get_children(array, schema);
-    std::vector<bool> validity = array.at(VALIDITY).get<std::vector<bool>>();
+    auto validity = array.at(VALIDITY).get<std::vector<bool>>();
     sparrow::big_list_view_array ar{get_children_arrays(array, schema)[0], std::move(validity), name};
     return sparrow::array{std::move(ar)};
 }
 
 sparrow::array primitive_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
 {
-    const std::string type = schema.at("type").at("name").get<std::string>();
-    if (type != "int")
-    {
-        throw std::runtime_error("Invalid type");
-    }
+    check_type(array, schema, "int");
     const uint8_t bit_width = schema.at("type").at("bitWidth").get<uint8_t>();
     const bool is_signed = schema.at("type").at("isSigned").get<bool>();
     const std::string name = schema.at("name").get<std::string>();
-    const std::vector<bool> validity = array.at(VALIDITY).get<std::vector<bool>>();
+    auto validity = array.at(VALIDITY).get<std::vector<bool>>();
 
     if (is_signed)
     {
         switch (bit_width)
         {
             case 8:
-                return sparrow::array{
-                    sparrow::primitive_array<int8_t>{array.at(DATA).get<std::vector<int8_t>>(), validity, name}
-                };
+                return sparrow::array{sparrow::primitive_array<int8_t>{
+                    array.at(DATA).get<std::vector<int8_t>>(),
+                    std::move(validity),
+                    name
+                }};
             case 16:
-                return sparrow::array{
-                    sparrow::primitive_array<int16_t>{array.at(DATA).get<std::vector<int16_t>>(), validity, name}
-                };
+                return sparrow::array{sparrow::primitive_array<int16_t>{
+                    array.at(DATA).get<std::vector<int16_t>>(),
+                    std::move(validity),
+                    name
+                }};
             case 32:
-                return sparrow::array{
-                    sparrow::primitive_array<int32_t>{array.at(DATA).get<std::vector<int32_t>>(), validity, name}
-                };
+                return sparrow::array{sparrow::primitive_array<int32_t>{
+                    array.at(DATA).get<std::vector<int32_t>>(),
+                    std::move(validity),
+                    name
+                }};
             case 64:
-                return sparrow::array{
-                    sparrow::primitive_array<int64_t>{array.at(DATA).get<std::vector<int64_t>>(), validity, name}
-                };
+                return sparrow::array{sparrow::primitive_array<int64_t>{
+                    array.at(DATA).get<std::vector<int64_t>>(),
+                    std::move(validity),
+                    name
+                }};
         }
     }
     else
@@ -199,21 +188,29 @@ sparrow::array primitive_array_from_json(const nlohmann::json& array, const nloh
         switch (bit_width)
         {
             case 8:
-                return sparrow::array{
-                    sparrow::primitive_array<uint8_t>{array.at(DATA).get<std::vector<uint8_t>>(), validity, name}
-                };
+                return sparrow::array{sparrow::primitive_array<uint8_t>{
+                    array.at(DATA).get<std::vector<uint8_t>>(),
+                    std::move(validity),
+                    name
+                }};
             case 16:
-                return sparrow::array{
-                    sparrow::primitive_array<uint16_t>{array.at(DATA).get<std::vector<uint16_t>>(), validity, name}
-                };
+                return sparrow::array{sparrow::primitive_array<uint16_t>{
+                    array.at(DATA).get<std::vector<uint16_t>>(),
+                    std::move(validity),
+                    name
+                }};
             case 32:
-                return sparrow::array{
-                    sparrow::primitive_array<uint32_t>{array.at(DATA).get<std::vector<uint32_t>>(), validity, name}
-                };
+                return sparrow::array{sparrow::primitive_array<uint32_t>{
+                    array.at(DATA).get<std::vector<uint32_t>>(),
+                    std::move(validity),
+                    name
+                }};
             case 64:
-                return sparrow::array{
-                    sparrow::primitive_array<uint64_t>{array.at(DATA).get<std::vector<uint64_t>>(), validity, name}
-                };
+                return sparrow::array{sparrow::primitive_array<uint64_t>{
+                    array.at(DATA).get<std::vector<uint64_t>>(),
+                    std::move(validity),
+                    name
+                }};
         }
     }
     throw std::runtime_error("Invalid bit width or signedness");
@@ -221,26 +218,24 @@ sparrow::array primitive_array_from_json(const nlohmann::json& array, const nloh
 
 sparrow::array floating_point_from_json(const nlohmann::json& array, const nlohmann::json& schema)
 {
-    const std::string type = schema.at("type").at("name").get<std::string>();
-    if (type != "floatingpoint")
-    {
-        throw std::runtime_error("Invalid type");
-    }
+    check_type(array, schema, "floatingpoint");
     const std::string precision = schema.at("type").at("precision").get<std::string>();
     const std::string name = schema.at("name").get<std::string>();
-    const std::vector<bool> validity = array.at(VALIDITY).get<std::vector<bool>>();
+    auto validity = array.at(VALIDITY).get<std::vector<bool>>();
 
     if (precision == "HALF")
     {
-        return sparrow::array{
-            sparrow::primitive_array<sparrow::float16_t>{array.at(DATA).get<std::vector<float>>(), validity, name}
-        };
+        return sparrow::array{sparrow::primitive_array<sparrow::float16_t>{
+            array.at(DATA).get<std::vector<float>>(),
+            std::move(validity),
+            name
+        }};
     }
     else if (precision == "SINGLE")
     {
         return sparrow::array{sparrow::primitive_array<sparrow::float32_t>{
             array.at(DATA).get<std::vector<sparrow::float32_t>>(),
-            validity,
+            std::move(validity),
             name
         }};
     }
@@ -248,7 +243,7 @@ sparrow::array floating_point_from_json(const nlohmann::json& array, const nlohm
     {
         return sparrow::array{sparrow::primitive_array<sparrow::float64_t>{
             array.at(DATA).get<std::vector<sparrow::float64_t>>(),
-            validity,
+            std::move(validity),
             name
         }};
     }
@@ -300,11 +295,7 @@ sparrow::array floating_point_from_json(const nlohmann::json& array, const nlohm
 
 sparrow::array decimal_from_json(const nlohmann::json& array, const nlohmann::json& schema)
 {
-    const std::string type = schema.at("type").at("name").get<std::string>();
-    if (type != "decimal")
-    {
-        throw std::runtime_error("Invalid type");
-    }
+    check_type(array, schema, "decimal");
     throw std::runtime_error("Not implemented");
     // const uint32_t precision = schema.at("type").at("precision").get<uint32_t>();
     // const uint32_t scale = schema.at("type").at("scale").get<uint32_t>();
@@ -326,83 +317,97 @@ sparrow::array decimal_from_json(const nlohmann::json& array, const nlohmann::js
 
 sparrow::array fixedsizebinary_from_json(const nlohmann::json& array, const nlohmann::json& schema)
 {
-    const std::string type = schema.at("type").at("name").get<std::string>();
-    if (type != "fixedsizebinary")
-    {
-        throw std::runtime_error("Invalid type");
-    }
+    check_type(array, schema, "fixedsizebinary");
     const std::string name = schema.at("name").get<std::string>();
     const std::size_t byte_width = schema.at("type").at("byteWidth").get<std::size_t>();
-    const std::vector<std::vector<uint8_t>> data = array.at(DATA).get<std::vector<std::vector<uint8_t>>>();
-    return sparrow::array{sparrow::fixed_width_binary_array{data, name}};
+    auto data = array.at(DATA).get<std::vector<std::vector<uint8_t>>>();
+    auto validity = array.at(VALIDITY).get<std::vector<bool>>();
+    return sparrow::array{sparrow::fixed_width_binary_array{std::move(data), std::move(validity), name}};
 }
 
 sparrow::array string_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
 {
-    const std::string type = schema.at("type").at("name").get<std::string>();
-    if (type != "utf8")
-    {
-        throw std::runtime_error("Invalid type");
-    }
+    check_type(array, schema, "utf8");
     const std::string name = schema.at("name").get<std::string>();
-    const std::vector<std::string> data = array.at(DATA).get<std::vector<std::string>>();
-    const std::vector<bool> validity = array.at(VALIDITY).get<std::vector<bool>>();
-    return sparrow::array{sparrow::string_array{data, validity, name}};
+    auto data = array.at(DATA).get<std::vector<std::string>>();
+    auto validity = array.at(VALIDITY).get<std::vector<bool>>();
+    return sparrow::array{sparrow::string_array{std::move(data), std::move(validity), name}};
 }
 
 sparrow::array big_string_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
 {
-    const std::string type = schema.at("type").at("name").get<std::string>();
-    if (type != "largeutf8")
-    {
-        throw std::runtime_error("Invalid type");
-    }
+    check_type(array, schema, "largeutf8");
     const std::string name = schema.at("name").get<std::string>();
-    const std::vector<std::string> data = array.at(DATA).get<std::vector<std::string>>();
-    const std::vector<bool> validity = array.at(VALIDITY).get<std::vector<bool>>();
-    return sparrow::array{sparrow::big_string_array{data, validity, name}};
+    auto data = array.at(DATA).get<std::vector<std::string>>();
+    auto validity = array.at(VALIDITY).get<std::vector<bool>>();
+    return sparrow::array{sparrow::big_string_array{std::move(data), std::move(validity), name}};
 }
 
 sparrow::array string_view_from_json(const nlohmann::json& array, const nlohmann::json& schema)
 {
-    const std::string type = schema.at("type").at("name").get<std::string>();
-    if (type != "utf8_view")
-    {
-        throw std::runtime_error("Invalid type");
-    }
+    check_type(array, schema, "utf8_view");
     const std::string name = schema.at("name").get<std::string>();
-    const std::vector<std::string> data = array.at(DATA).get<std::vector<std::string>>();
-    const std::vector<bool> validity = array.at(VALIDITY).get<std::vector<bool>>();
-    return sparrow::array{sparrow::string_view_array{data, validity, name}};
+    auto data = array.at(DATA).get<std::vector<std::string>>();
+    auto validity = array.at(VALIDITY).get<std::vector<bool>>();
+    return sparrow::array{sparrow::string_view_array{std::move(data), std::move(validity), name}};
 }
 
 sparrow::array date_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
 {
-    const std::string type = schema.at("type").at("name").get<std::string>();
-    if (type != "date")
-    {
-        throw std::runtime_error("Invalid type");
-    }
-
+    check_type(array, schema, "date");
     const std::string name = schema.at("name").get<std::string>();
     const std::string unit = schema.at("type").at("unit").get<std::string>();
+    auto validity = array.at(VALIDITY).get<std::vector<bool>>();
+
     if (unit == "DAY")
     {
-        return sparrow::date_days_array{};
+        auto data = array.at(DATA).get<std::vector<int32_t>>();
+        return sparrow::array{sparrow::date_days_array{std::move(data), std::move(validity), name}};
     }
+    else if (unit == "MILLISECOND")
+    {
+        auto data = array.at(DATA).get<std::vector<int64_t>>();
+        return sparrow::array{sparrow::date_milliseconds_array{std::move(data), std::move(validity), name}};
+    }
+    else
+    {
+        throw std::runtime_error("Invalid unit");
+    }
+}
 
-    const std::vector<int32_t> data = array.at(DATA).get<std::vector<int32_t>>();
-    const std::vector<bool> validity = array.at(VALIDITY).get<std::vector<bool>>();
-    return sparrow::array{sparrow::date_array{data, validity, name}};
+sparrow::array time_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
+{
+    check_type(array, schema, "time");
+    const std::string name = schema.at("name").get<std::string>();
+    const std::string unit = schema.at("type").at("unit").get<std::string>();
+    auto data = array.at(DATA).get<std::vector<int64_t>>();
+    auto validity = array.at(VALIDITY).get<std::vector<bool>>();
+
+    if (unit == "SECOND")
+    {
+        return sparrow::array{sparrow::time_seconds_array{std::move(data), std::move(validity), name}};
+    }
+    else if (unit == "MILLISECOND")
+    {
+        return sparrow::array{sparrow::time_milliseconds_array{std::move(data), std::move(validity), name}};
+    }
+    else if (unit == "MICROSECOND")
+    {
+        return sparrow::array{sparrow::time_microseconds_array{std::move(data), std::move(validity), name}};
+    }
+    else if (unit == "NANOSECOND")
+    {
+        return sparrow::array{sparrow::time_nanoseconds_array{std::move(data), std::move(validity), name}};
+    }
+    else
+    {
+        throw std::runtime_error("Invalid unit");
+    }
 }
 
 sparrow::array timestamp_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
 {
-    const std::string type = schema.at("type").at("name").get<std::string>();
-    if (type != "timestamp")
-    {
-        throw std::runtime_error("Invalid type");
-    }
+    check_type(array, schema, "timestamp");
     const std::string name = schema.at("name").get<std::string>();
     const std::string unit = schema.at("type").at("unit").get<std::string>();
     std::optional<std::string> timezone;
@@ -411,23 +416,29 @@ sparrow::array timestamp_array_from_json(const nlohmann::json& array, const nloh
         timezone = schema.at("type").at("timezone").get<std::string>();
     }
     const date::time_zone* tz = timezone ? date::locate_zone(*timezone) : nullptr;
-    const std::vector<int64_t> data = array.at(DATA).get<std::vector<int64_t>>();
-    const std::vector<bool> validity = array.at(VALIDITY).get<std::vector<bool>>();
+    auto data = array.at(DATA).get<std::vector<int64_t>>();
+    auto validity = array.at(VALIDITY).get<std::vector<bool>>();
     if (unit == "SECOND")
     {
-        return sparrow::array{sparrow::timestamp_seconds_array{tz, data, validity, name, timezone}};
+        return sparrow::array{sparrow::timestamp_seconds_array{tz, std::move(data), std::move(validity), name}};
     }
     else if (unit == "MILLISECOND")
     {
-        return sparrow::array{sparrow::timestamp_milliseconds_array{tz, data, validity, name, timezone}};
+        return sparrow::array{
+            sparrow::timestamp_milliseconds_array{tz, std::move(data), std::move(validity), name}
+        };
     }
     else if (unit == "MICROSECOND")
     {
-        return sparrow::array{sparrow::timestamp_microseconds_array{tz, data, validity, name, timezone}};
+        return sparrow::array{
+            sparrow::timestamp_microseconds_array{tz, std::move(data), std::move(validity), name}
+        };
     }
     else if (unit == "NANOSECOND")
     {
-        return sparrow::array{sparrow::timestamp_nanoseconds_array{tz, data, validity, name, timezone}};
+        return sparrow::array{
+            sparrow::timestamp_nanoseconds_array{tz, std::move(data), std::move(validity), name}
+        };
     }
     else
     {
@@ -437,30 +448,26 @@ sparrow::array timestamp_array_from_json(const nlohmann::json& array, const nloh
 
 sparrow::array duration_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
 {
-    const std::string type = schema.at("type").at("name").get<std::string>();
-    if (type != "duration")
-    {
-        throw std::runtime_error("Invalid type");
-    }
+    check_type(array, schema, "duration");
     const std::string name = schema.at("name").get<std::string>();
     const std::string unit = schema.at("type").at("unit").get<std::string>();
-    const std::vector<int64_t> data = array.at(DATA).get<std::vector<int64_t>>();
-    const std::vector<bool> validity = array.at(VALIDITY).get<std::vector<bool>>();
+    auto data = array.at(DATA).get<std::vector<int64_t>>();
+    auto validity = array.at(VALIDITY).get<std::vector<bool>>();
     if (unit == "SECOND")
     {
-        return sparrow::array{sparrow::duration_seconds_array{data, validity, name}};
+        return sparrow::array{sparrow::duration_seconds_array{data, std::move(validity), std::move(name)}};
     }
     else if (unit == "MILLISECOND")
     {
-        return sparrow::array{sparrow::duration_milliseconds_array{data, validity, name}};
+        return sparrow::array{sparrow::duration_milliseconds_array{data, std::move(validity), std::move(name)}};
     }
     else if (unit == "MICROSECOND")
     {
-        return sparrow::array{sparrow::duration_microseconds_array{data, validity, name}};
+        return sparrow::array{sparrow::duration_microseconds_array{data, std::move(validity), std::move(name)}};
     }
     else if (unit == "NANOSECOND")
     {
-        return sparrow::array{sparrow::duration_nanoseconds_array{data, validity, name}};
+        return sparrow::array{sparrow::duration_nanoseconds_array{data, std::move(validity), std::move(name)}};
     }
     else
     {
@@ -470,22 +477,18 @@ sparrow::array duration_array_from_json(const nlohmann::json& array, const nlohm
 
 sparrow::array interval_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
 {
-    const std::string type = schema.at("type").at("name").get<std::string>();
-    if (type != "interval")
-    {
-        throw std::runtime_error("Invalid type");
-    }
+    check_type(array, schema, "interval");
     const std::string name = schema.at("name").get<std::string>();
     const std::string unit = schema.at("type").at("unit").get<std::string>();
-    const std::vector<int64_t> data = array.at(DATA).get<std::vector<int64_t>>();
-    const std::vector<bool> validity = array.at(VALIDITY).get<std::vector<bool>>();
+    auto data = array.at(DATA).get<std::vector<int64_t>>();
+    auto validity = array.at(VALIDITY).get<std::vector<bool>>();
     if (unit == "YEAR_MONTH")
     {
-        return sparrow::array{sparrow::months_interval_array{data, validity, name}};
+        return sparrow::array{sparrow::months_interval_array{data, std::move(validity), std::move(name)}};
     }
     else if (unit == "DAY_TIME")
     {
-        return sparrow::array{sparrow::days_time_interval_array{data, validity, name}};
+        return sparrow::array{sparrow::days_time_interval_array{data, std::move(validity), std::move(name)}};
     }
     else
     {
@@ -495,20 +498,16 @@ sparrow::array interval_array_from_json(const nlohmann::json& array, const nlohm
 
 sparrow::array sparse_union_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
 {
-    const std::string type = schema.at("type").at("name").get<std::string>();
-    if (type != "union")
-    {
-        throw std::runtime_error("Invalid type");
-    }
+    check_type(array, schema, "union");
     const std::string mode = schema.at("type").at("mode").get<std::string>();
     if (mode != "sparse")
     {
         throw std::runtime_error("Invalid mode");
     }
     const std::string name = schema.at("name").get<std::string>();
-    const std::vector<uint8_t> type_ids_values = schema.at("type").at("typeIds").get<std::vector<uint8_t>>();
-    const sparrow::sparse_union_array::type_id_buffer_type type_ids{type_ids_values};
-    const std::vector<nlohmann::json> children = schema.at("children").get<std::vector<nlohmann::json>>();
+    auto type_ids_values = schema.at("type").at("typeIds").get<std::vector<uint8_t>>();
+    const sparrow::sparse_union_array::type_id_buffer_type type_ids{std::move(type_ids_values)};
+    const auto children = schema.at("children").get<std::vector<nlohmann::json>>();
     std::vector<sparrow::array> arrays;
     arrays.reserve(children.size());
     for (const auto& child : children)
@@ -525,11 +524,7 @@ sparrow::array dense_union_array_from_json(const nlohmann::json& array, const nl
 
 sparrow::array union_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
 {
-    const std::string type = schema.at("type").at("name").get<std::string>();
-    if (type != "union")
-    {
-        throw std::runtime_error("Invalid type");
-    }
+    check_type(array, schema, "union");
     const std::string mode = schema.at("type").at("mode").get<std::string>();
     if (mode == "dense")
     {
@@ -543,6 +538,12 @@ sparrow::array union_array_from_json(const nlohmann::json& array, const nlohmann
     {
         throw std::runtime_error("Invalid mode");
     }
+}
+
+sparrow::array runendencoded_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
+{
+    check_type(array, schema, "runencoded");
+    return sparrow::array{sparrow::run_end_encoded_array{}};
 }
 
 void read_schema_from_json(const nlohmann::json& data)
@@ -577,114 +578,45 @@ void read_schema_from_json(const nlohmann::json& data)
     }
 }
 
+// Unordered map witk key = type name and value = function
+using array_builder_function = std::function<sparrow::array(const nlohmann::json&, const nlohmann::json&)>;
+const std::unordered_map<std::string, array_builder_function> array_builders{
+    {"null", null_array_from_json},
+    {"struct", struct_array_from_json},
+    {"list", list_array_from_json},
+    {"largelist", large_list_array_from_json},
+    {"listview", list_view_array_from_json},
+    {"largelistview", large_list_view_array_from_json},
+    {"union", union_array_from_json},
+    {"int", primitive_array_from_json},
+    {"floatingpoint", floating_point_from_json},
+    {"utf8", string_array_from_json},
+    {"largeutf8", big_string_array_from_json},
+    // {"binary", binary_array_from_json},
+    // {"largebinary", binary_array_from_json},
+    {"utf8view", string_view_from_json},
+    // {"binaryview", binary_array_from_json},
+    {"fixedsizebinary", fixedsizebinary_from_json},
+    // {"bool", primitive_array_from_json},
+    {"decimal", decimal_from_json},
+    {"date", date_array_from_json},
+    {"time", time_array_from_json},
+    {"timestamp", timestamp_array_from_json},
+    {"interval", interval_array_from_json},
+    {"duration", duration_array_from_json},
+    {"sparse_union", sparse_union_array_from_json},
+    {"runencoded", runendencoded_array_from_json},
+};
+
 sparrow::array build_array_from_json(const nlohmann::json& array, const nlohmann::json& schema)
 {
     const std::string type = schema.at("type").at("name").get<std::string>();
-    if (type == "null")
+    const auto builder_it = array_builders.find(type);
+    if (builder_it == array_builders.end())
     {
-        return null_array_from_json(array, schema);
+        throw std::runtime_error("Invalid type");
     }
-    else if (type == "struct")
-    {
-        return struct_array_from_json(array, schema);
-    }
-    else if (type == "list")
-    {
-        return list_array_from_json(array, schema);
-    }
-    else if (type == "largelist")
-    {
-        return large_list_array_from_json(array, schema);
-    }
-    else if (type == "listview")
-    {
-        return list_view_array_from_json(array, schema);
-    }
-    else if (type == "largelistview")
-    {
-        return large_list_view_array_from_json(array, schema);
-    }
-    else if (type == "union")
-    {
-        return union_array_from_json(array, schema);
-    }
-    else if (type == "int")
-    {
-        return primitive_array_from_json(array, schema);
-    }
-    else if (type == "floatingpoint")
-    {
-        return floating_point_from_json(array, schema);
-    }
-    else if (type == "utf8")
-    {
-        return string_array_from_json(array, schema);
-    }
-    else if (type == "largeutf8")
-    {
-        return big_string_array_from_json(array, schema);
-    }
-    else if (type == "binary")
-    {
-        // TODO: Implement
-    }
-    else if (type == "largebinary")
-    {
-        // TODO: Implement
-    }
-    else if (type == "utf8view")
-    {
-        return string_view_from_json(array, schema);
-    }
-    else if (type == "binaryview")
-    {
-        // TODO: Implement
-    }
-    else if (type == "fixedsizebinary")
-    {
-        // TODO: Implement
-    }
-    else if (type == "bool")
-    {
-        // TODO: Implement
-    }
-    else if (type == "decimal")
-    {
-        return decimal_from_json(array, schema);
-    }
-    else if (type == "date")
-    {
-        return date
-    }
-    else if (type == "fixedsizelist")
-    {
-        return fixedsizelist_from_json(array, schema);
-    }
-
-    else if (type == "fixedsizebinary")
-    {
-        return fixedsizebinary_from_json(array, schema);
-    }
-
-    else if (type == "timestamp")
-    {
-        return timestamp_array_from_json(array, schema);
-    }
-    else if (type == "duration")
-    {
-        return duration_array_from_json(array, schema);
-    }
-    else if (type == "interval")
-    {
-        return interval_array_from_json(array, schema);
-    }
-
-    else if (type == "sparse_union")
-    {
-        return sparse_union_array_from_json(array, schema);
-    }
-
-    return sparrow::array{};
+    return builder_it->second(array, schema);
 }
 
 std::vector<sparrow::record_batch> build_arrays_from_json(const nlohmann::json& data)
