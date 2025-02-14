@@ -20,6 +20,8 @@ if(FETCH_DEPENDENCIES_WITH_CMAKE STREQUAL "ON" OR FETCH_DEPENDENCIES_WITH_CMAKE 
     endif()
 endif()
 
+find_package(doctest REQUIRED)
+
 add_library(c_data_integration SHARED
     c_data_integration.cpp
     c_data_integration.hpp)
@@ -29,3 +31,10 @@ target_link_libraries(c_data_integration
         sparrow
     PRIVATE
         nlohmann_json::nlohmann_json)
+
+add_executable(test_c_data_integration test_c_data_integration.cpp)
+target_link_libraries(test_c_data_integration
+    PRIVATE
+        c_data_integration
+        doctest::doctest)
+        

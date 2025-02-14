@@ -12,10 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 
-#include <sparrow/c_interface.hpp>
-#include <sparrow/config/config.hpp>
+#include <filesystem>
 
-SPARROW_API const char*
-nanoarrow_CDataIntegration_ExportSchemaFromJson(const char* json_path, ArrowSchema* out);
+#include "sparrow/c_interface.hpp"
+
+#include "c_data_integration.hpp"
+#include "doctest/doctest.h"
+
+TEST_SUITE("c_data_integration")
+{
+    TEST_CASE("ExportSchemaFromJson")
+    {
+        std::filesystem::path
+            json = "C:/Users/alexi/dev/quantstack/sparrow/test/integration/jsons/generated/primitive.json";
+        ArrowSchema schema;
+        nanoarrow_CDataIntegration_ExportSchemaFromJson(json.string().c_str(), &schema);
+    }
+}
