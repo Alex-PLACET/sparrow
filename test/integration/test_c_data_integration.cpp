@@ -21,13 +21,43 @@
 #include "c_data_integration.hpp"
 #include "doctest/doctest.h"
 
+const std::filesystem::path json_files_path = JSON_FILES_PATH;
+
+std::vector<std::filesystem::path> json_to_test = {
+    "generated/custom-metadata.json",
+    "generated/datetime.json",
+    "generated/decimal128.json",
+    "generated/dictionary-nested.json",
+    "generated/dictionary-unsigned.json",
+    "generated/dictionary.json",
+    "generated/extension.json",
+    "generated/map.json",
+    "generated/nested.json",
+    "generated/non_canonical_map.json",
+    "generated/null-trivial.json",
+    "generated/null.json",
+    "generated/primitive-empty.json",
+    "generated/primitive-no-batches.json",
+    "generated/primitive.json",
+    "generated/recursive-nested.json",
+    "generated/unions.json",
+};
+
 TEST_SUITE("c_data_integration")
 {
     TEST_CASE("ExportSchemaFromJson")
     {
-        std::filesystem::path
-            json = "C:/Users/alexi/dev/quantstack/sparrow/test/integration/jsons/generated/primitive.json";
-        ArrowSchema schema;
-        nanoarrow_CDataIntegration_ExportSchemaFromJson(json.string().c_str(), &schema);
+        for (const auto& json : json_to_test)
+        {
+            SUBCASE(json.string().c_str())
+            {
+                ArrowSchema schema;
+                const auto result = nanoarrow_CDataIntegration_ExportSchemaFromJson(
+                    (json_files_path / json).string().c_str(),
+                    &schema
+                );
+                CHECK_EQ(result, nullptr);
+            }
+        }
     }
 }

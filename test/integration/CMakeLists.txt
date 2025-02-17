@@ -37,4 +37,8 @@ target_link_libraries(test_c_data_integration
     PRIVATE
         c_data_integration
         doctest::doctest)
+
+target_compile_definitions(test_c_data_integration
+    PRIVATE
+        JSON_FILES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/jsons/")
         
