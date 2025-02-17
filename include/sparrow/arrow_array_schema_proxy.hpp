@@ -29,6 +29,8 @@
 #include "sparrow/c_interface.hpp"
 #include "sparrow/config/config.hpp"
 #include "sparrow/types/data_type.hpp"
+#include "sparrow/utils/pair.hpp"
+#include "sparrow/utils/ranges.hpp"
 
 namespace sparrow
 {
@@ -115,14 +117,14 @@ namespace sparrow
          * @param name The name to set.
          */
         SPARROW_API void set_name(std::optional<std::string_view> name);
-        [[nodiscard]] SPARROW_API std::optional<std::string_view> metadata() const;
+        [[nodiscard]] SPARROW_API std::optional<metadata_container> metadata() const;
 
         /**
          * Set the metadata of the `ArrowSchema`.
          * @exception `arrow_proxy_exception` If the `ArrowSchema` was not created with sparrow.
          * @param metadata The metadata to set.
          */
-        SPARROW_API void set_metadata(std::optional<std::string_view> metadata);
+        SPARROW_API void set_metadata(std::optional<metadata_container> metadata);
         [[nodiscard]] SPARROW_API std::vector<ArrowFlag> flags() const;
 
         /**
@@ -585,7 +587,7 @@ struct std::formatter<sparrow::arrow_proxy>
             "arrow_proxy\n- format: {}\n- name; {}\n- metadata: {}\n- data_type: {}\n- null_count:{}\n- length: {}\n- offset: {}\n- n_buffers: {}\n- buffers:\n{}\n- n_children: {}\n-children: {}\n- dictionary: {}",
             obj.format(),
             obj.name().value_or(""),
-            obj.metadata().value_or(""),
+            obj.metadata().value_or(sparrow::arrow_proxy::metadata_container{}),
             obj.data_type(),
             obj.null_count(),
             obj.length(),

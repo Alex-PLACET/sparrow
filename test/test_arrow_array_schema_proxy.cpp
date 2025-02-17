@@ -186,19 +186,20 @@ TEST_SUITE("ArrowArrowSchemaProxy")
 
     TEST_CASE("set_metadata")
     {
+        const sparrow::arrow_proxy::metadata_container metadata = {{"key", "value"}};
         SUBCASE("on sparrow c structure")
         {
             auto [array, schema] = test::make_arrow_schema_and_array(false);
             sparrow::arrow_proxy proxy(std::move(array), std::move(schema));
-            proxy.set_metadata("new metadata");
-            CHECK_EQ(proxy.metadata(), "new metadata");
+            proxy.set_metadata(metadata);
+            CHECK_EQ(proxy.metadata(), metadata);
         }
 
         SUBCASE("on external c structure")
         {
             auto [array, schema] = make_external_arrow_schema_and_array();
             sparrow::arrow_proxy proxy(std::move(array), std::move(schema));
-            CHECK_THROWS_AS(proxy.set_metadata("new metadata"), std::runtime_error);
+            CHECK_THROWS_AS(proxy.set_metadata(metadata), std::runtime_error);
         }
     }
 

@@ -98,7 +98,7 @@ namespace sparrow
         SPARROW_API explicit null_array(arrow_proxy);
 
         [[nodiscard]] SPARROW_API std::optional<std::string_view> name() const;
-        [[nodiscard]] SPARROW_API std::optional<std::string_view> metadata() const;
+        [[nodiscard]] SPARROW_API std::optional<arrow_proxy::metadata_container> metadata() const;
 
         [[nodiscard]] SPARROW_API size_type size() const;
 

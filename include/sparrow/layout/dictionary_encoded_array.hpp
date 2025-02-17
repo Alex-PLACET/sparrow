@@ -309,7 +309,7 @@ namespace sparrow
     }
 
     template <std::integral IT>
-    std::optional<std::string_view> dictionary_encoded_array<IT>::metadata() const
+    std::optional<arrow_proxy::metadata_container> dictionary_encoded_array<IT>::metadata() const
     {
         return m_proxy.metadata();
     }
