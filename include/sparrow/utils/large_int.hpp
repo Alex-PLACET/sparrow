@@ -128,7 +128,19 @@ struct std::formatter<sparrow::int128_t>
         return ctx.begin();  // Simple implementation
     }
 
-    auto format(const sparrow::int128_t&, std::format_context& ctx) const
+        auto format(const sparrow::int128_t& n, std::format_context& ctx) const
+        {
+#    ifdef SPARROW_USE_LARGE_INT_PLACEHOLDERS
+            return std::format_to(ctx.out(), "int128_t({}, {})", n.words[0], n.words[1]);
+#    else
+            const std::string str = primesum::to_string(n);
+            return std::format_to(ctx.out(), "{}", str);
+#    endif
+        }
+    };
+
+    template <>
+    struct formatter<sparrow::int256_t>
     {
         return std::format_to(ctx.out(), "{}", "Integer int128_t TODO");
     }
@@ -148,4 +160,22 @@ struct std::formatter<sparrow::int256_t>
     }
 };
 
+        auto format(const sparrow::int256_t& n, std::format_context& ctx) const
+        {
+#    ifdef SPARROW_USE_LARGE_INT_PLACEHOLDERS
+            return std::format_to(
+                ctx.out(),
+                "int256_t({}, {}, {}, {})",
+                n.words[0],
+                n.words[1],
+                n.words[2],
+                n.words[3]
+            );
+#    else
+            const std::string str = primesum::to_string(n);
+            return std::format_to(ctx.out(), "{}", str);
+#    endif
+        }
+    };
+}
 #endif
