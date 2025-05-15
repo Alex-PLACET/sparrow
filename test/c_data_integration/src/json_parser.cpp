@@ -33,7 +33,7 @@ namespace sparrow::c_data_integration
     using array_builder_function = std::function<
         sparrow::array(const nlohmann::json&, const nlohmann::json&, const nlohmann::json&)>;
     const std::unordered_map<std::string, array_builder_function> array_builders{
-        // {"union", union_array_from_json},
+        {"union", union_array_from_json},
         {"int", primitive_array_from_json},
         {"floatingpoint", floating_point_from_json},
         {"utf8", string_array_from_json},
