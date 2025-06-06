@@ -91,8 +91,8 @@ namespace sparrow
         using array_type = decimal_array<T>;
 
         using inner_value_type = T;
-        using inner_reference = T;
-        using inner_const_reference = T;
+        using inner_reference = T&;
+        using inner_const_reference = const T&;
 
         using bitmap_const_reference = bitmap_type::const_reference;
 

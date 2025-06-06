@@ -139,6 +139,65 @@ namespace sparrow
                 CHECK_EQ(static_cast<std::int64_t>(val.storage()), 33);
                 CHECK_EQ(static_cast<double>(val), doctest::Approx(0.0033));
             }
+
+            SUBCASE("operator[]")
+            {
+                SUBCASE("const")
+                {
+                    const decimal_array<decimal<INTEGER_TYPE>> array{values, bitmaps, precision, scale};
+                    CHECK_EQ(array.size(), 4);
+                    for (std::size_t i = 0; i < array.size(); ++i)
+                    {
+                        CHECK_EQ(array[i].has_value(), bitmaps[i]);
+                        if (array[i].has_value())
+                        {
+                            const auto& val = array[i].value();
+                            CHECK_EQ(val.scale(), scale);
+                            CHECK_EQ(static_cast<std::int64_t>(val.storage()), values[i]);
+                            CHECK_EQ(
+                                static_cast<double>(val),
+                                doctest::Approx(static_cast<double>(values[i]) / std::pow(10, scale))
+                            );
+                        }
+                    }
+                }
+
+                SUBCASE("mutable")
+                {
+                    decimal_array<decimal<INTEGER_TYPE>> array{values, bitmaps, precision, scale};
+                    CHECK_EQ(array.size(), 4);
+                    for (std::size_t i = 0; i < array.size(); ++i)
+                    {
+                        CHECK_EQ(array[i].has_value(), bitmaps[i]);
+                        if (array[i].has_value())
+                        {
+                            auto val = array[i].value();
+                            val = decimal<INTEGER_TYPE>(val.storage() + 1, val.scale());
+                            CHECK_EQ(val.scale(), scale);
+                            CHECK_EQ(static_cast<std::int64_t>(val.storage()), values[i] + 1);
+                            CHECK_EQ(
+                                static_cast<double>(val),
+                                doctest::Approx((static_cast<double>(values[i]) + 1) / std::pow(10, scale))
+                            );
+                        }
+                    }
+                }
+            }
+
+            SUBCASE("zero_null_values")
+            {
+                decimal_array<decimal<INTEGER_TYPE>> array{values, bitmaps, precision, scale};
+                array.zero_null_values();
+                for (std::size_t i = 0; i < array.size(); ++i)
+                {
+                    const auto& val = array[i];
+                    if (!val.has_value())
+                    {
+                        CHECK_EQ(val.get().storage(), 0);
+                        CHECK_EQ(val.get().scale(), 0);
+                    }
+                }
+            }
         }
 
         TEST_CASE_TEMPLATE_APPLY(decimal_array_test_generic_id, integer_types);
