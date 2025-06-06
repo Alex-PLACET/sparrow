@@ -44,22 +44,33 @@ namespace sparrow
         decimal_reference(const decimal_reference&) = default;
         decimal_reference(decimal_reference&&) noexcept = default;
 
+        self_type& operator=(self_type&& rhs);
+        self_type& operator=(const self_type& rhs);
+
         self_type& operator=(value_type&& rhs);
         self_type& operator=(const value_type& rhs);
+
+        explicit operator float() const
+            requires(!is_int_placeholder_v<typename value_type::integer_type>);
+        explicit operator double() const
+            requires(!is_int_placeholder_v<typename value_type::integer_type>);
+        explicit operator long double() const
+            requires(!is_int_placeholder_v<typename value_type::integer_type>);
+
+        [[nodiscard]] explicit operator std::string() const
+            requires(!is_int_placeholder_v<typename value_type::integer_type>);
 
         bool operator==(const value_type& rhs) const;
         auto operator<=>(const value_type& rhs) const;
 
         [[nodiscard]] const_reference value() const;
+        [[nodiscard]] const value_type::integer_type& storage() const;
+        [[nodiscard]] int scale() const;
 
     private:
 
         L* p_layout = nullptr;
         size_type m_index = size_type(0);
-#if defined(__cpp_lib_format)
-        template <class>
-        friend struct std::formatter;
-#endif
     };
 
     /*************************************
@@ -88,6 +99,20 @@ namespace sparrow
     }
 
     template <typename L>
+    auto decimal_reference<L>::operator=(self_type&& rhs) -> self_type&
+    {
+        this->operator=(rhs.value());
+        return *this;
+    }
+
+    template <typename L>
+    auto decimal_reference<L>::operator=(const self_type& rhs) -> self_type&
+    {
+        this->operator=(rhs.value());
+        return *this;
+    }
+
+    template <typename L>
     bool decimal_reference<L>::operator==(const value_type& rhs) const
     {
         return value() == rhs;
@@ -103,6 +128,39 @@ namespace sparrow
     auto decimal_reference<L>::value() const -> const_reference
     {
         return static_cast<const L*>(p_layout)->value(m_index);
+    }
+
+    template <typename L>
+    auto decimal_reference<L>::storage() const -> const value_type::integer_type&
+    {
+        return value().storage();
+    }
+
+    template <typename L>
+    int decimal_reference<L>::scale() const
+    {
+        return value().scale();
+    }
+
+    template <typename L>
+    decimal_reference<L>::operator float() const
+        requires(!is_int_placeholder_v<typename value_type::integer_type>)
+    {
+        return static_cast<float>(value());
+    }
+
+    template <typename L>
+    decimal_reference<L>::operator double() const
+        requires(!is_int_placeholder_v<typename value_type::integer_type>)
+    {
+        return static_cast<double>(value());
+    }
+
+    template <typename L>
+    decimal_reference<L>::operator long double() const
+        requires(!is_int_placeholder_v<typename value_type::integer_type>)
+    {
+        return static_cast<long double>(value());
     }
 }
 

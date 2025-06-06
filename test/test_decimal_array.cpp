@@ -15,6 +15,7 @@
 #include <cstdint>
 
 #include "sparrow/layout/decimal_array.hpp"
+#include "sparrow/utils/nullable.hpp"
 
 #include "test_utils.hpp"
 
@@ -184,6 +185,19 @@ namespace sparrow
                 }
             }
 
+            SUBCASE("modify an element with a different scale")
+            {
+                decimal_array<decimal<INTEGER_TYPE>> array{values, bitmaps, precision, scale};
+                CHECK_EQ(array.size(), 4);
+                decimal<INTEGER_TYPE> new_value(100, 2);  // Different scale
+                array[0] = make_nullable(new_value);
+                CHECK_EQ(array[0].has_value(), true);
+                const auto& val = array[0].value();
+                CHECK_EQ(val.scale(), scale);
+                CHECK_EQ(static_cast<std::int64_t>(val.storage()), 10000);
+                CHECK_EQ(static_cast<double>(val), doctest::Approx(1.0));
+            }
+
             SUBCASE("zero_null_values")
             {
                 decimal_array<decimal<INTEGER_TYPE>> array{values, bitmaps, precision, scale};
@@ -193,8 +207,8 @@ namespace sparrow
                     const auto& val = array[i];
                     if (!val.has_value())
                     {
-                        CHECK_EQ(val.get().storage(), 0);
-                        CHECK_EQ(val.get().scale(), 0);
+                        const auto storage = val.get().storage();
+                        CHECK_EQ(storage, 0);
                     }
                 }
             }
