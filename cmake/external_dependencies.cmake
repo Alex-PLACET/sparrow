@@ -81,3 +81,31 @@ if(ENABLE_INTEGRATION_TEST)
         endif()
     endif()
 endif()
+
+if(BUILD_BENCHMARKS)
+    if(NOT FETCH_DEPENDENCIES_WITH_CMAKE STREQUAL "ON")
+        find_package(benchmark ${FIND_PACKAGE_OPTIONS})
+    endif()
+    if(FETCH_DEPENDENCIES_WITH_CMAKE STREQUAL "ON" OR FETCH_DEPENDENCIES_WITH_CMAKE STREQUAL "MISSING")
+        if(NOT benchmark_FOUND)
+            set(BENCHMARK_VERSION "v1.9.4")
+            message(STATUS "📦 Fetching GoogleBenchmark ${BENCHMARK_VERSION}")
+            set(BENCHMARK_ENABLE_TESTING OFF)
+            set(BENCHMARK_ENABLE_INSTALL OFF)
+            set(BENCHMARK_ENABLE_GTEST_TESTS OFF)
+            FetchContent_Declare(
+                benchmark
+                GIT_SHALLOW TRUE
+                GIT_REPOSITORY https://github.com/google/benchmark.git
+                GIT_TAG ${BENCHMARK_VERSION}
+                GIT_PROGRESS TRUE
+                SYSTEM
+                EXCLUDE_FROM_ALL)
+            FetchContent_MakeAvailable(benchmark)
+            unset(BENCHMARK_ENABLE_TESTING CACHE)
+            unset(BENCHMARK_ENABLE_INSTALL CACHE)
+            unset(BENCHMARK_ENABLE_GTEST_TESTS CACHE)
+            message(STATUS "\t✅ Fetched GoogleBenchmark ${BENCHMARK_VERSION}")
+        endif()
+    endif()
+endif()

@@ -90,6 +90,8 @@ message(STATUS "sparrow binary version: v${SPARROW_BINARY_VERSION}")
 # =============
 OPTION(BUILD_TESTS "Build sparrow test suite" OFF)
 MESSAGE(STATUS "🔧 Build tests: ${BUILD_TESTS}")
+OPTION(BUILD_BENCHMARKS "Build sparrow benchmark suite" OFF)
+MESSAGE(STATUS "🔧 Build benchmarks: ${BUILD_BENCHMARKS}")
 OPTION(BUILD_DOCS "Build sparrow documentation" OFF)
 MESSAGE(STATUS "🔧 Build docs: ${BUILD_DOCS}")
 OPTION(BUILD_EXAMPLES "Build sparrow examples" OFF)
@@ -405,6 +407,11 @@ if(BUILD_TESTS)
     message(STATUS "🧪 Create tests targets")
     enable_testing()
     add_subdirectory(test)
+endif()
+
+if(BUILD_BENCHMARKS)
+    message(STATUS "🏁 Create benchmark targets")
+    add_subdirectory(benchmarks)
 endif()
 
 # Docs
