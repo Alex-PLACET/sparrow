@@ -13,16 +13,21 @@
 // limitations under the License.
 
 #include <chrono>
+#include <optional>
 #include <random>
 #include <vector>
 
 #include <benchmark/benchmark.h>
 
-#include "sparrow/layout/primitive_layout/primitive_array.hpp"
-#include "sparrow/utils/nullable.hpp"
-
 namespace sparrow::benchmark
 {
+    // Constants to avoid magic numbers
+    constexpr double FLOATING_POINT_MULTIPLIER = 0.1;
+    constexpr int RANDOM_SEED = 42;
+    constexpr double NULL_PROBABILITY = 0.1;
+    constexpr size_t INITIAL_ARRAY_SIZE = 1000;
+    constexpr int INSERT_VALUE = 42;
+
     // Benchmark data generators
     template <typename T>
     std::vector<T> generate_sequential_data(size_t size)
@@ -41,7 +46,7 @@ namespace sparrow::benchmark
         {
             for (size_t i = 0; i < size; ++i)
             {
-                data.push_back(static_cast<T>(i) * static_cast<T>(0.1));
+                data.push_back(static_cast<T>(i) * static_cast<T>(FLOATING_POINT_MULTIPLIER));
             }
         }
         else
@@ -56,10 +61,10 @@ namespace sparrow::benchmark
     }
 
     template <typename T>
-    std::vector<nullable<T>>
+    std::vector<std::optional<T>>
     generate_nullable_data(const std::vector<T>& data, double null_probability, std::mt19937& gen)
     {
-        std::vector<nullable<T>> nullable_data;
+        std::vector<std::optional<T>> nullable_data;
         nullable_data.reserve(data.size());
 
         std::bernoulli_distribution null_dist(null_probability);
@@ -81,15 +86,15 @@ namespace sparrow::benchmark
 
     // Benchmark: Construction from vector
     template <typename T>
-    static void BM_PrimitiveArray_ConstructFromVector(::benchmark::State& state)
+    static void BM_StdVector_ConstructFromVector(::benchmark::State& state)
     {
         const size_t size = static_cast<size_t>(state.range(0));
         auto data = generate_sequential_data<T>(size);
 
         for (auto _ : state)
         {
-            primitive_array<T> array(data);
-            ::benchmark::DoNotOptimize(array);
+            std::vector<T> vec(data);
+            ::benchmark::DoNotOptimize(vec);
             ::benchmark::ClobberMemory();
         }
 
@@ -98,17 +103,17 @@ namespace sparrow::benchmark
 
     // Benchmark: Construction with nullable data
     template <typename T>
-    static void BM_PrimitiveArray_ConstructWithNulls(::benchmark::State& state)
+    static void BM_StdVector_ConstructWithNulls(::benchmark::State& state)
     {
         const size_t size = static_cast<size_t>(state.range(0));
-        std::mt19937 gen(42);  // Fixed seed for reproducibility
+        std::mt19937 gen(RANDOM_SEED);  // Fixed seed for reproducibility
         auto data = generate_sequential_data<T>(size);
-        auto nullable_data = generate_nullable_data(data, 0.1, gen);  // 10% null values
+        auto nullable_data = generate_nullable_data(data, NULL_PROBABILITY, gen);  // 10% null values
 
         for (auto _ : state)
         {
-            primitive_array<T> array(nullable_data);
-            ::benchmark::DoNotOptimize(array);
+            std::vector<std::optional<T>> vec(nullable_data);
+            ::benchmark::DoNotOptimize(vec);
             ::benchmark::ClobberMemory();
         }
 
@@ -117,24 +122,21 @@ namespace sparrow::benchmark
 
     // Benchmark: Element access (operator[])
     template <typename T>
-    static void BM_PrimitiveArray_ElementAccess(::benchmark::State& state)
+    static void BM_StdVector_ElementAccess(::benchmark::State& state)
     {
         const size_t size = static_cast<size_t>(state.range(0));
         auto data = generate_sequential_data<T>(size);
-        primitive_array<T> array(data);
+        std::vector<T> vec(data);
 
         size_t index = 0;
         T sum = T{};
 
         for (auto _ : state)
         {
-            auto element = array[index % size];
-            if (element.has_value())
+            auto element = vec[index % size];
+            if constexpr (!std::is_same_v<T, bool>)
             {
-                if constexpr (!std::is_same_v<T, bool>)
-                {
-                    sum += element.value();
-                }
+                sum += element;
             }
             index++;
             ::benchmark::DoNotOptimize(sum);
@@ -145,23 +147,20 @@ namespace sparrow::benchmark
 
     // Benchmark: Iterator traversal
     template <typename T>
-    static void BM_PrimitiveArray_IteratorTraversal(::benchmark::State& state)
+    static void BM_StdVector_IteratorTraversal(::benchmark::State& state)
     {
         const size_t size = static_cast<size_t>(state.range(0));
         auto data = generate_sequential_data<T>(size);
-        primitive_array<T> array(data);
+        std::vector<T> vec(data);
 
         for (auto _ : state)
         {
             T sum = T{};
-            for (auto it = array.begin(); it != array.end(); ++it)
+            for (auto it = vec.begin(); it != vec.end(); ++it)
             {
-                if (it->has_value())
+                if constexpr (!std::is_same_v<T, bool>)
                 {
-                    if constexpr (!std::is_same_v<T, bool>)
-                    {
-                        sum += it->value();
-                    }
+                    sum += *it;
                 }
             }
             ::benchmark::DoNotOptimize(sum);
@@ -173,23 +172,20 @@ namespace sparrow::benchmark
 
     // Benchmark: Range-based for loop traversal
     template <typename T>
-    static void BM_PrimitiveArray_RangeBasedFor(::benchmark::State& state)
+    static void BM_StdVector_RangeBasedFor(::benchmark::State& state)
     {
         const size_t size = static_cast<size_t>(state.range(0));
         auto data = generate_sequential_data<T>(size);
-        primitive_array<T> array(data);
+        std::vector<T> vec(data);
 
         for (auto _ : state)
         {
             T sum = T{};
-            for (const auto& element : array)
+            for (const auto& element : vec)
             {
-                if (element.has_value())
+                if constexpr (!std::is_same_v<T, bool>)
                 {
-                    if constexpr (!std::is_same_v<T, bool>)
-                    {
-                        sum += element.value();
-                    }
+                    sum += element;
                 }
             }
             ::benchmark::DoNotOptimize(sum);
@@ -199,19 +195,18 @@ namespace sparrow::benchmark
         state.SetItemsProcessed(static_cast<int64_t>(state.iterations() * size));
     }
 
-    // Benchmark: Value iterator traversal
+    // Benchmark: Value iterator traversal (same as iterator for std::vector)
     template <typename T>
-    static void BM_PrimitiveArray_ValueIterator(::benchmark::State& state)
+    static void BM_StdVector_ValueIterator(::benchmark::State& state)
     {
         const size_t size = static_cast<size_t>(state.range(0));
         auto data = generate_sequential_data<T>(size);
-        primitive_array<T> array(data);
+        std::vector<T> vec(data);
 
         for (auto _ : state)
         {
             T sum = T{};
-            auto values = array.values();
-            for (auto it = values.begin(); it != values.end(); ++it)
+            for (auto it = vec.begin(); it != vec.end(); ++it)
             {
                 if constexpr (!std::is_same_v<T, bool>)
                 {
@@ -227,29 +222,29 @@ namespace sparrow::benchmark
 
     // Benchmark: Insert operation (push_back)
     template <typename T>
-    static void BM_PrimitiveArray_PushBack(::benchmark::State& state)
+    static void BM_StdVector_PushBack(::benchmark::State& state)
     {
-        const size_t initial_size = 1000;
+        const size_t initial_size = INITIAL_ARRAY_SIZE;
         const size_t insert_count = static_cast<size_t>(state.range(0));
 
         for (auto _ : state)
         {
             auto initial_data = generate_sequential_data<T>(initial_size);
-            primitive_array<T> array(initial_data);
+            std::vector<T> vec(initial_data);
 
-            const nullable<T> value_to_insert{static_cast<T>(42)};
+            const T value_to_insert = static_cast<T>(INSERT_VALUE);
 
             const auto start = std::chrono::high_resolution_clock::now();
             for (size_t i = 0; i < insert_count; ++i)
             {
-                array.push_back(value_to_insert);
+                vec.push_back(value_to_insert);
             }
             auto end = std::chrono::high_resolution_clock::now();
 
             auto elapsed_seconds = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
             state.SetIterationTime(elapsed_seconds.count());
 
-            ::benchmark::DoNotOptimize(array);
+            ::benchmark::DoNotOptimize(vec);
             ::benchmark::ClobberMemory();
         }
 
@@ -258,16 +253,16 @@ namespace sparrow::benchmark
 
     // Benchmark: Copy operation
     template <typename T>
-    static void BM_PrimitiveArray_Copy(::benchmark::State& state)
+    static void BM_StdVector_Copy(::benchmark::State& state)
     {
         const size_t size = static_cast<size_t>(state.range(0));
         auto data = generate_sequential_data<T>(size);
-        primitive_array<T> original_array(data);
+        std::vector<T> original_vec(data);
 
         for (auto _ : state)
         {
-            primitive_array<T> copied_array(original_array);
-            ::benchmark::DoNotOptimize(copied_array);
+            std::vector<T> copied_vec(original_vec);
+            ::benchmark::DoNotOptimize(copied_vec);
             ::benchmark::ClobberMemory();
         }
 
@@ -275,50 +270,50 @@ namespace sparrow::benchmark
     }
 
 // Macro to register all benchmarks for a specific type
-#define REGISTER_PRIMITIVE_BENCHMARKS(TYPE)                         \
-    BENCHMARK_TEMPLATE(BM_PrimitiveArray_ConstructFromVector, TYPE) \
-        ->RangeMultiplier(10)                                       \
-        ->Range(100, 100000)                                        \
-        ->Unit(::benchmark::kMicrosecond);                          \
-    BENCHMARK_TEMPLATE(BM_PrimitiveArray_ConstructWithNulls, TYPE)  \
-        ->RangeMultiplier(10)                                       \
-        ->Range(100, 100000)                                        \
-        ->Unit(::benchmark::kMicrosecond);                          \
-    BENCHMARK_TEMPLATE(BM_PrimitiveArray_ElementAccess, TYPE)       \
-        ->RangeMultiplier(10)                                       \
-        ->Range(100, 100000)                                        \
-        ->Unit(::benchmark::kNanosecond);                           \
-    BENCHMARK_TEMPLATE(BM_PrimitiveArray_IteratorTraversal, TYPE)   \
-        ->RangeMultiplier(10)                                       \
-        ->Range(100, 100000)                                        \
-        ->Unit(::benchmark::kMicrosecond);                          \
-    BENCHMARK_TEMPLATE(BM_PrimitiveArray_RangeBasedFor, TYPE)       \
-        ->RangeMultiplier(10)                                       \
-        ->Range(100, 100000)                                        \
-        ->Unit(::benchmark::kMicrosecond);                          \
-    BENCHMARK_TEMPLATE(BM_PrimitiveArray_ValueIterator, TYPE)       \
-        ->RangeMultiplier(10)                                       \
-        ->Range(100, 100000)                                        \
-        ->Unit(::benchmark::kMicrosecond);                          \
-    BENCHMARK_TEMPLATE(BM_PrimitiveArray_PushBack, TYPE)            \
-        ->RangeMultiplier(10)                                       \
-        ->Range(10, 1000)                                           \
-        ->Unit(::benchmark::kMicrosecond)                           \
-        ->UseManualTime();                                          \
-    BENCHMARK_TEMPLATE(BM_PrimitiveArray_Copy, TYPE)                \
-        ->RangeMultiplier(10)                                       \
-        ->Range(100, 100000)                                        \
+#define REGISTER_VECTOR_BENCHMARKS(TYPE)                       \
+    BENCHMARK_TEMPLATE(BM_StdVector_ConstructFromVector, TYPE) \
+        ->RangeMultiplier(10)                                  \
+        ->Range(100, 100000)                                   \
+        ->Unit(::benchmark::kMicrosecond);                     \
+    BENCHMARK_TEMPLATE(BM_StdVector_ConstructWithNulls, TYPE)  \
+        ->RangeMultiplier(10)                                  \
+        ->Range(100, 100000)                                   \
+        ->Unit(::benchmark::kMicrosecond);                     \
+    BENCHMARK_TEMPLATE(BM_StdVector_ElementAccess, TYPE)       \
+        ->RangeMultiplier(10)                                  \
+        ->Range(100, 100000)                                   \
+        ->Unit(::benchmark::kNanosecond);                      \
+    BENCHMARK_TEMPLATE(BM_StdVector_IteratorTraversal, TYPE)   \
+        ->RangeMultiplier(10)                                  \
+        ->Range(100, 100000)                                   \
+        ->Unit(::benchmark::kMicrosecond);                     \
+    BENCHMARK_TEMPLATE(BM_StdVector_RangeBasedFor, TYPE)       \
+        ->RangeMultiplier(10)                                  \
+        ->Range(100, 100000)                                   \
+        ->Unit(::benchmark::kMicrosecond);                     \
+    BENCHMARK_TEMPLATE(BM_StdVector_ValueIterator, TYPE)       \
+        ->RangeMultiplier(10)                                  \
+        ->Range(100, 100000)                                   \
+        ->Unit(::benchmark::kMicrosecond);                     \
+    BENCHMARK_TEMPLATE(BM_StdVector_PushBack, TYPE)            \
+        ->RangeMultiplier(10)                                  \
+        ->Range(10, 1000)                                      \
+        ->Unit(::benchmark::kMicrosecond)                      \
+        ->UseManualTime();                                     \
+    BENCHMARK_TEMPLATE(BM_StdVector_Copy, TYPE)                \
+        ->RangeMultiplier(10)                                  \
+        ->Range(100, 100000)                                   \
         ->Unit(::benchmark::kMicrosecond);
 
     // Register benchmarks for all types
-    REGISTER_PRIMITIVE_BENCHMARKS(std::uint8_t)
-    REGISTER_PRIMITIVE_BENCHMARKS(std::uint16_t)
-    REGISTER_PRIMITIVE_BENCHMARKS(std::uint32_t)
-    REGISTER_PRIMITIVE_BENCHMARKS(std::uint64_t)
-    REGISTER_PRIMITIVE_BENCHMARKS(float)
-    REGISTER_PRIMITIVE_BENCHMARKS(double)
-    REGISTER_PRIMITIVE_BENCHMARKS(bool)
+    REGISTER_VECTOR_BENCHMARKS(std::uint8_t)
+    REGISTER_VECTOR_BENCHMARKS(std::uint16_t)
+    REGISTER_VECTOR_BENCHMARKS(std::uint32_t)
+    REGISTER_VECTOR_BENCHMARKS(std::uint64_t)
+    REGISTER_VECTOR_BENCHMARKS(float)
+    REGISTER_VECTOR_BENCHMARKS(double)
+    REGISTER_VECTOR_BENCHMARKS(bool)
 
-#undef REGISTER_PRIMITIVE_BENCHMARKS
+#undef REGISTER_VECTOR_BENCHMARKS
 
 }  // namespace sparrow::benchmark
