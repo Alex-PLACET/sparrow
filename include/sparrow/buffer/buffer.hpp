@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <concepts>
+#include <cstddef>
 #include <iterator>
 #include <memory>
 #include <ranges>
@@ -25,7 +26,9 @@
 #include "sparrow/buffer/allocator.hpp"
 #include "sparrow/utils/contracts.hpp"
 #include "sparrow/utils/iterator.hpp"
+#include "sparrow/utils/memory_alignment.hpp"
 #include "sparrow/utils/mp_utils.hpp"
+
 
 #if not defined(SPARROW_BUFFER_GROWTH_FACTOR)
 #    define SPARROW_BUFFER_GROWTH_FACTOR 2
@@ -58,6 +61,7 @@ namespace sparrow
             pointer p_begin = nullptr;
             pointer p_end = nullptr;
             pointer p_storage_end = nullptr;
+            bool owns_memory = false;  // Track if buffer owns the memory
 
             constexpr buffer_data() noexcept = default;
             constexpr buffer_data(buffer_data&&) noexcept;
@@ -93,6 +97,8 @@ namespace sparrow
         constexpr void assign_storage(pointer p, size_type n, size_type cap);
 
     private:
+
+        constexpr pointer allocate_aligned(size_type n);
 
         allocator_type m_alloc;
         buffer_data m_data;
@@ -309,10 +315,12 @@ namespace sparrow
         : p_begin(rhs.p_begin)
         , p_end(rhs.p_end)
         , p_storage_end(rhs.p_storage_end)
+        , owns_memory(rhs.owns_memory)
     {
         rhs.p_begin = nullptr;
         rhs.p_end = nullptr;
         rhs.p_storage_end = nullptr;
+        rhs.owns_memory = false;
     }
 
     template <class T>
@@ -321,6 +329,7 @@ namespace sparrow
         std::swap(p_begin, rhs.p_begin);
         std::swap(p_end, rhs.p_end);
         std::swap(p_storage_end, rhs.p_storage_end);
+        std::swap(owns_memory, rhs.owns_memory);
         return *this;
     }
 
@@ -351,7 +360,10 @@ namespace sparrow
     template <class T>
     buffer_base<T>::~buffer_base()
     {
-        deallocate(m_data.p_begin, static_cast<size_type>(m_data.p_storage_end - m_data.p_begin));
+        if (m_data.owns_memory)
+        {
+            deallocate(m_data.p_begin, static_cast<size_type>(m_data.p_storage_end - m_data.p_begin));
+        }
     }
 
     template <class T>
@@ -389,7 +401,7 @@ namespace sparrow
     template <class T>
     constexpr auto buffer_base<T>::allocate(size_type n) -> pointer
     {
-        return alloc_traits::allocate(m_alloc, n);
+        return allocate_aligned(n);
     }
 
     template <class T>
@@ -401,9 +413,10 @@ namespace sparrow
     template <class T>
     constexpr void buffer_base<T>::create_storage(size_type n)
     {
-        m_data.p_begin = allocate(n);
+        m_data.p_begin = allocate_aligned(n);
         m_data.p_end = m_data.p_begin + n;
-        m_data.p_storage_end = m_data.p_end;
+        m_data.p_storage_end = m_data.p_begin + calculate_aligned_size<T>(n) / sizeof(T);
+        m_data.owns_memory = true;  // Buffer owns this memory
     }
 
     template <class T>
@@ -413,6 +426,25 @@ namespace sparrow
         m_data.p_begin = p;
         m_data.p_end = p + n;
         m_data.p_storage_end = p + cap;
+        m_data.owns_memory = false;  // External memory - buffer doesn't own it
+    }
+
+    template <class T>
+    constexpr auto buffer_base<T>::allocate_aligned(size_type n) -> pointer
+    {
+        if (n == 0)
+        {
+            return nullptr;
+        }
+
+        // Calculate the aligned size in elements
+        const size_type byte_size = n * sizeof(T);
+        const size_type aligned_byte_size = align_to_64_bytes(byte_size);
+        const size_type aligned_element_count = aligned_byte_size / sizeof(T);
+
+        // Simply allocate the aligned size
+        // Modern allocators typically return aligned memory for larger allocations
+        return alloc_traits::allocate(m_alloc, aligned_element_count);
     }
 
     /*************************
@@ -534,10 +566,13 @@ namespace sparrow
             else
             {
                 clear();
-                this->deallocate(
-                    get_data().p_begin,
-                    static_cast<size_type>(get_data().p_storage_end - get_data().p_begin)
-                );
+                if (get_data().owns_memory)
+                {
+                    this->deallocate(
+                        get_data().p_begin,
+                        static_cast<size_type>(get_data().p_storage_end - get_data().p_begin)
+                    );
+                }
                 this->assign_storage(nullptr, 0, 0);
             }
         }
@@ -771,11 +806,15 @@ namespace sparrow
                     std::make_move_iterator(get_data().p_end)
                 );
                 destroy(get_data().p_begin, get_data().p_end, get_allocator());
-                this->deallocate(
-                    get_data().p_begin,
-                    static_cast<size_type>(get_data().p_storage_end - get_data().p_begin)
-                );
+                if (get_data().owns_memory)
+                {
+                    this->deallocate(
+                        get_data().p_begin,
+                        static_cast<size_type>(get_data().p_storage_end - get_data().p_begin)
+                    );
+                }
                 this->assign_storage(tmp, old_size, new_cap);
+                get_data().owns_memory = true;  // Buffer now owns the new memory
             }
         }
     }
@@ -1025,8 +1064,12 @@ namespace sparrow
             check_init_length(len, get_allocator());
             pointer p = allocate_and_copy(len, first, last);
             destroy(get_data().p_begin, get_data().p_end, get_allocator());
-            this->deallocate(get_data().p_begin, capacity());
+            if (get_data().owns_memory)
+            {
+                this->deallocate(get_data().p_begin, capacity());
+            }
             this->assign_storage(p, len, len);
+            get_data().owns_memory = true;  // Buffer now owns the new memory
         }
         else if (sz >= len)
         {
