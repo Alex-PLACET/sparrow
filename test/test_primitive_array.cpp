@@ -196,6 +196,15 @@ namespace sparrow
                 }
             }
 
+            SUBCASE("data")
+            {
+                const auto raw_data = ar.data();
+                for (size_t i = 0; i < ar.size(); ++i)
+                {
+                    CHECK_EQ(raw_data[i], ar[i].get());
+                }
+            }
+
             SUBCASE("front")
             {
                 SUBCASE("const")

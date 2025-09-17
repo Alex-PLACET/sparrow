@@ -229,6 +229,8 @@ namespace sparrow
          */
         constexpr primitive_array_impl& operator=(primitive_array_impl&&) noexcept;
 
+        using access_class_type::data;
+
     private:
 
         /**

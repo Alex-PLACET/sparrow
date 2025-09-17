@@ -14,6 +14,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 #include "sparrow/arrow_interface/arrow_array_schema_proxy.hpp"
 #include "sparrow/buffer/buffer_adaptor.hpp"
 #include "sparrow/buffer/dynamic_bitset/dynamic_bitset_view.hpp"
@@ -161,6 +163,8 @@ namespace sparrow
             [[nodiscard]] static u8_buffer<bool> make_data_buffer(RANGE&& r);
 
             [[nodiscard]] static u8_buffer<bool> make_data_buffer(size_t size, bool value);
+
+            [[nodiscard]] const bitset_view& data() const;
 
         private:
 
@@ -536,6 +540,11 @@ namespace sparrow
             bitset_view v(buffer, size);
             init_func(v);
             return res;
+        }
+
+        [[nodiscard]] inline auto primitive_data_access<bool>::data() const -> const bitset_view&
+        {
+            return m_view;
         }
 
         [[nodiscard]] inline size_t primitive_data_access<bool>::get_offset(size_t i) const
