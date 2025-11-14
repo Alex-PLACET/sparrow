@@ -181,7 +181,8 @@ namespace sparrow
         DURATION_NANOSECONDS,
         INTERVAL_MONTHS,
         INTERVAL_DAYS_TIME,
-        INTERVAL_MONTHS_DAYS_NANOSECONDS
+        INTERVAL_MONTHS_DAYS_NANOSECONDS,
+        FIXED_SHAPE_TENSOR
     };
 
     // helper function to check if a string is all digits
@@ -923,6 +924,8 @@ namespace std
                         return "String view";
                     case BINARY_VIEW:
                         return "Binary view";
+                    case FIXED_SHAPE_TENSOR:
+                        return "Fixed shape tensor";
                 };
                 return "UNKNOWN";
             };

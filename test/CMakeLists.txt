@@ -61,6 +61,7 @@ set(SPARROW_TESTS_SOURCES
     test_duration_array.cpp
     test_dynamic_bitset_view.cpp
     test_dynamic_bitset.cpp
+    test_fixed_shape_tensor_array.cpp
     test_fixed_string.cpp
     test_fixed_width_binary_array.cpp
     test_fixed_width_binary_utils.cpp

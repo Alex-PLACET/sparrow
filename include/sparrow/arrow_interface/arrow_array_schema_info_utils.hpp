@@ -70,6 +70,7 @@ namespace sparrow
             case data_type::FIXED_SIZED_LIST:
             case data_type::STRING_VIEW:
             case data_type::BINARY_VIEW:
+            case data_type::FIXED_SHAPE_TENSOR:
                 return true;
             case data_type::MAP:
             case data_type::NA:

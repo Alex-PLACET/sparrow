@@ -20,6 +20,7 @@
 #include "sparrow/decimal_array.hpp"
 #include "sparrow/dictionary_encoded_array.hpp"
 #include "sparrow/duration_array.hpp"
+#include "sparrow/fixed_shape_tensor_array.hpp"
 #include "sparrow/fixed_width_binary_array.hpp"
 #include "sparrow/interval_array.hpp"
 #include "sparrow/layout/array_wrapper.hpp"
@@ -126,7 +127,25 @@ namespace sparrow
                 case data_type::LARGE_LIST_VIEW:
                     return func(unwrap_array<big_list_view_array>(ar));
                 case data_type::FIXED_SIZED_LIST:
+                {
+                    // Check if this is a fixed shape tensor extension type
+                    const std::optional<key_value_view> metadata = ar.get_arrow_proxy().metadata();
+                    if (metadata.has_value())
+                    {
+                        const auto it = metadata->find("ARROW:extension:name");
+                        if (it != metadata->end())
+                        {
+                            const auto [key, value] = *it;
+                            if (value == "arrow.fixed_shape_tensor")
+                            {
+                                return func(unwrap_array<fixed_shape_tensor_array>(ar));
+                            }
+                        }
+                    }
                     return func(unwrap_array<fixed_sized_list_array>(ar));
+                }
+                case data_type::FIXED_SHAPE_TENSOR:
+                    return func(unwrap_array<fixed_shape_tensor_array>(ar));
                 case data_type::STRUCT:
                     return func(unwrap_array<struct_array>(ar));
                 case data_type::MAP:

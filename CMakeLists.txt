@@ -301,6 +301,7 @@ set(SPARROW_HEADERS
     ${SPARROW_INCLUDE_DIR}/sparrow/decimal_array.hpp
     ${SPARROW_INCLUDE_DIR}/sparrow/dictionary_encoded_array.hpp
     ${SPARROW_INCLUDE_DIR}/sparrow/duration_array.hpp
+    ${SPARROW_INCLUDE_DIR}/sparrow/fixed_shape_tensor_array.hpp
     ${SPARROW_INCLUDE_DIR}/sparrow/fixed_width_binary_array.hpp
     ${SPARROW_INCLUDE_DIR}/sparrow/json_array.hpp
     ${SPARROW_INCLUDE_DIR}/sparrow/list_array.hpp
@@ -338,6 +339,7 @@ set(SPARROW_SRC
     ${SPARROW_SOURCE_DIR}/utils/metadata.cpp
     ${SPARROW_SOURCE_DIR}/utils/temporal.cpp
     ${SPARROW_SOURCE_DIR}/array.cpp
+    ${SPARROW_SOURCE_DIR}/fixed_shape_tensor_array.cpp
     ${SPARROW_SOURCE_DIR}/map_array.cpp
     ${SPARROW_SOURCE_DIR}/null_array.cpp
     ${SPARROW_SOURCE_DIR}/record_batch.cpp
