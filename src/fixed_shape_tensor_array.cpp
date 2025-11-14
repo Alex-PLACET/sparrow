@@ -12,17 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "sparrow/fixed_shape_tensor_array.hpp"
+
 #include <sstream>
 #include <stdexcept>
 
-#include "sparrow/arrow_interface/arrow_array.hpp"
-#include "sparrow/arrow_interface/arrow_schema.hpp"
-#include "sparrow/buffer/dynamic_bitset/dynamic_bitset.hpp"
-#include "sparrow/fixed_shape_tensor_array.hpp"
 #include "sparrow/layout/array_factory.hpp"
 #include "sparrow/layout/layout_utils.hpp"
 #include "sparrow/utils/contracts.hpp"
-#include "sparrow/utils/repeat_container.hpp"
 
 namespace sparrow
 {
@@ -39,7 +36,9 @@ namespace sparrow
             for (size_t i = 0; i < shape.size(); ++i)
             {
                 if (i > 0)
+                {
                     json << ",";
+                }
                 json << shape[i];
             }
             json << "]";
@@ -50,7 +49,9 @@ namespace sparrow
                 for (size_t i = 0; i < dim_names->size(); ++i)
                 {
                     if (i > 0)
+                    {
                         json << ",";
+                    }
                     json << "\"" << (*dim_names)[i] << "\"";
                 }
                 json << "]";
@@ -62,7 +63,9 @@ namespace sparrow
                 for (size_t i = 0; i < shape.size(); ++i)
                 {
                     if (i > 0)
+                    {
                         json << ",";
+                    }
                     json << i;
                 }
                 json << "]";
@@ -123,10 +126,14 @@ namespace sparrow
                     {
                         auto quote_start = json.find('"', current_pos);
                         if (quote_start >= dim_names_end)
+                        {
                             break;
+                        }
                         auto quote_end = json.find('"', quote_start + 1);
                         if (quote_end >= dim_names_end)
+                        {
                             break;
+                        }
                         names.push_back(json.substr(quote_start + 1, quote_end - quote_start - 1));
                         current_pos = quote_end + 1;
                     }
@@ -149,9 +156,14 @@ namespace sparrow
     fixed_shape_tensor_array::fixed_shape_tensor_array(arrow_proxy proxy)
         : base_type(std::move(proxy))
         , p_flat_array(make_flat_array())
+        , m_tensor_size(
+              [this]()
+              {
+                  parse_metadata();
+                  return compute_tensor_size(m_shape);
+              }()
+          )
     {
-        parse_metadata();
-        m_tensor_size = compute_tensor_size(m_shape);
     }
 
     fixed_shape_tensor_array::fixed_shape_tensor_array(const self_type& rhs)
@@ -205,31 +217,22 @@ namespace sparrow
 
     constexpr auto fixed_shape_tensor_array::value_begin() -> value_iterator
     {
-        return value_iterator(detail::layout_value_functor<self_type, inner_value_type>(this), 0);
+        return {detail::layout_value_functor<self_type, inner_value_type>(this), 0};
     }
 
     constexpr auto fixed_shape_tensor_array::value_end() -> value_iterator
     {
-        return value_iterator(
-            detail::layout_value_functor<self_type, inner_value_type>(this),
-            this->size()
-        );
+        return {detail::layout_value_functor<self_type, inner_value_type>(this), this->size()};
     }
 
     auto fixed_shape_tensor_array::value_cbegin() const -> const_value_iterator
     {
-        return const_value_iterator(
-            detail::layout_value_functor<const self_type, inner_value_type>(this),
-            0
-        );
+        return {detail::layout_value_functor<const self_type, inner_value_type>(this), 0};
     }
 
     auto fixed_shape_tensor_array::value_cend() const -> const_value_iterator
     {
-        return const_value_iterator(
-            detail::layout_value_functor<const self_type, inner_value_type>(this),
-            this->size()
-        );
+        return {detail::layout_value_functor<const self_type, inner_value_type>(this), this->size()};
     }
 
     auto fixed_shape_tensor_array::value(size_type i) -> inner_reference
@@ -242,7 +245,9 @@ namespace sparrow
     {
         const auto offset = i * m_tensor_size;
         return list_value{p_flat_array.get(), offset, offset + static_cast<size_type>(m_tensor_size)};
-    }    cloning_ptr<array_wrapper> fixed_shape_tensor_array::make_flat_array()
+    }
+
+    cloning_ptr<array_wrapper> fixed_shape_tensor_array::make_flat_array()
     {
         return array_factory(this->get_arrow_proxy().children()[0].view());
     }
@@ -284,7 +289,6 @@ namespace sparrow
 
         if (m_column_major)
         {
-            // Column-major (Fortran-style): first dimension varies fastest
             for (size_t i = 0; i < indices.size(); ++i)
             {
                 SPARROW_ASSERT(indices[i] >= 0 && indices[i] < m_shape[i], "Index out of bounds");
@@ -294,13 +298,9 @@ namespace sparrow
         }
         else
         {
-            // Row-major (C-style): last dimension varies fastest
-            for (int i = static_cast<int>(indices.size()) - 1; i >= 0; --i)
+            for (size_t i = indices.size() - 1; i >= 0; --i)
             {
-                SPARROW_ASSERT(
-                    indices[i] >= 0 && indices[i] < m_shape[i],
-                    "Index out of bounds"
-                );
+                SPARROW_ASSERT(indices[i] >= 0 && indices[i] < m_shape[i], "Index out of bounds");
                 flat_idx += indices[i] * stride;
                 stride *= m_shape[i];
             }
