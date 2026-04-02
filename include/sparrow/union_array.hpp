@@ -15,15 +15,18 @@
 #pragma once
 
 #include <array>
+#include <limits>
 #include <optional>
+#include <stdexcept>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
 #include "sparrow/array_api.hpp"
 #include "sparrow/arrow_interface/arrow_flag_utils.hpp"
+#include "sparrow/buffer/buffer_adaptor.hpp"
 #include "sparrow/config/config.hpp"
 #include "sparrow/layout/array_access.hpp"
-#include "sparrow/layout/array_factory.hpp"
-#include "sparrow/layout/array_helper.hpp"
-#include "sparrow/layout/array_wrapper.hpp"
 #include "sparrow/layout/layout_utils.hpp"
 #include "sparrow/layout/nested_value_types.hpp"
 #include "sparrow/utils/contracts.hpp"
@@ -58,6 +61,21 @@ namespace sparrow
                 return sparrow::data_type::SPARSE_UNION;
             }
         };
+
+        SPARROW_API void
+        validate_union_child_insert_value(const array& child, const array_traits::value_type& value);
+
+        SPARROW_API void validate_union_child_erase(const array& child);
+
+        SPARROW_API void insert_union_child_value(
+            array& child,
+            std::size_t pos,
+            const array_traits::value_type& value,
+            std::size_t count
+        );
+
+        [[nodiscard]] SPARROW_API array_traits::value_type
+        make_union_child_default_value(const array& child, bool is_valid);
     }
 
     /**
@@ -138,6 +156,26 @@ namespace sparrow
         using size_type = std::size_t;
 
         using type_id_buffer_type = u8_buffer<std::uint8_t>;
+
+        struct typed_value
+        {
+            std::uint8_t type_id = 0;
+            array_traits::value_type value;
+
+            typed_value() = default;
+
+            constexpr typed_value(std::uint8_t type_id_arg, array_traits::value_type value_arg)
+                : type_id(type_id_arg)
+                , value(std::move(value_arg))
+            {
+            }
+
+            template <class T, mpl::boolean_like B>
+            constexpr typed_value(std::uint8_t type_id_arg, nullable<T, B> value_arg)
+                : typed_value(type_id_arg, array_traits::value_type(std::move(value_arg)))
+            {
+            }
+        };
 
         /**
          * @brief Gets the optional name of the union array.
@@ -338,6 +376,33 @@ namespace sparrow
          */
         [[nodiscard]] constexpr const_reverse_iterator crend() const;
 
+        [[nodiscard]] iterator insert(const_iterator pos, const typed_value& value);
+
+        [[nodiscard]] iterator insert(const_iterator pos, const typed_value& value, size_type count);
+
+        template <std::input_iterator InputIt>
+            requires std::convertible_to<typename std::iterator_traits<InputIt>::value_type, typed_value>
+        [[nodiscard]] iterator insert(const_iterator pos, InputIt first, InputIt last);
+
+        template <std::ranges::input_range R>
+            requires std::convertible_to<std::ranges::range_value_t<R>, typed_value>
+        [[nodiscard]] iterator insert(const_iterator pos, R&& range)
+        {
+            return insert(pos, std::ranges::begin(range), std::ranges::end(range));
+        }
+
+        [[nodiscard]] iterator erase(const_iterator pos);
+
+        [[nodiscard]] iterator erase(const_iterator first, const_iterator last);
+
+        void push_back(const typed_value& value);
+
+        void pop_back();
+
+        void resize(size_type new_length, const typed_value& value);
+
+        void clear();
+
         /**
          * @brief Sets all null values to the specified value.
          *
@@ -359,8 +424,10 @@ namespace sparrow
     protected:
 
         static constexpr size_t TYPE_ID_MAP_SIZE = 256;
+        static constexpr size_type TYPE_IDS_BUFFER_INDEX = 0;
+        static constexpr size_type INVALID_CHILD_INDEX = std::numeric_limits<size_type>::max();
 
-        using type_id_map = std::array<std::uint8_t, TYPE_ID_MAP_SIZE>;
+        using type_id_map = std::array<size_type, TYPE_ID_MAP_SIZE>;
 
         /**
          * @brief Parses type ID mapping from Arrow format string.
@@ -408,7 +475,7 @@ namespace sparrow
         static constexpr std::string
         make_format_string(bool dense, std::size_t n, const std::optional<R>& child_index_to_type_id);
 
-        using children_type = std::vector<cloning_ptr<array_wrapper>>;
+        using children_type = std::vector<array>;
 
         /**
          * @brief Creates child array wrappers from Arrow proxy.
@@ -421,6 +488,29 @@ namespace sparrow
          * @post Each child corresponds to a union member type
          */
         constexpr children_type make_children(arrow_proxy& proxy);
+
+        void throw_if_sliced_for_mutation(const char* operation) const;
+
+        [[nodiscard]] size_type child_index_from_type_id(std::uint8_t type_id) const;
+
+        [[nodiscard]] bool child_is_nullable(size_type child_index) const;
+
+        [[nodiscard]] const std::uint8_t* make_type_ids() const;
+
+        void refresh_type_id_cache();
+
+        [[nodiscard]] array& raw_child_wrapper(size_type child_index);
+
+        [[nodiscard]] const array& child_wrapper(size_type child_index) const;
+
+        void validate_child_insert_value(const array& child, const array_traits::value_type& value) const;
+
+        void validate_child_erase(const array& child) const;
+
+        void
+        insert_child_value(array& child, size_type pos, const array_traits::value_type& value, size_type count) const;
+
+        [[nodiscard]] array_traits::value_type make_inactive_child_value(size_type child_index) const;
 
         /**
          * @brief Protected constructor from Arrow proxy.
@@ -480,10 +570,10 @@ namespace sparrow
          */
         [[nodiscard]] constexpr const arrow_proxy& get_arrow_proxy() const;
 
-        arrow_proxy m_proxy;                                       ///< Internal Arrow proxy
-        const std::uint8_t* p_type_ids;                            ///< Pointer to type ID buffer
-        children_type m_children;                                  ///< Child array wrappers
-        std::array<std::uint8_t, TYPE_ID_MAP_SIZE> m_type_id_map;  ///< Type ID to child index mapping
+        arrow_proxy m_proxy;             ///< Internal Arrow proxy
+        const std::uint8_t* p_type_ids;  ///< Pointer to type ID buffer
+        children_type m_children;        ///< Child array wrappers
+        type_id_map m_type_id_map;       ///< Type ID to child index mapping
 
         friend class detail::array_access;
 
@@ -544,7 +634,10 @@ namespace sparrow
     public:
 
         using base_type = union_array_crtp_base<dense_union_array>;
+        using const_iterator = typename base_type::const_iterator;
         using offset_buffer_type = u8_buffer<std::uint32_t>;
+        using size_type = typename base_type::size_type;
+        using typed_value = typename base_type::typed_value;
         using type_id_buffer_type = typename base_type::type_id_buffer_type;
 
         /**
@@ -610,7 +703,7 @@ namespace sparrow
 
     private:
 
-        using type_id_map = typename base_type::type_id_map;
+        static constexpr size_type OFFSETS_BUFFER_INDEX = 1;
 
         /**
          * @brief Creates proxy for dense union array from child arrays, type IDs, and offsets.
@@ -768,7 +861,19 @@ namespace sparrow
          */
         SPARROW_API std::size_t element_offset(std::size_t i) const;
 
-        const std::int32_t* p_offsets;  ///< Pointer to offset buffer
+        void insert_value(const_iterator pos, const typed_value& value, size_type count);
+
+        void erase_values(const_iterator pos, size_type count);
+
+        void throw_if_offsets_are_not_canonical_for_mutation(const char* operation) const;
+
+        [[nodiscard]] size_type child_offset_before(size_type end_index, std::uint8_t type_id) const;
+
+        void recompute_offsets(size_type new_length);
+
+        [[nodiscard]] const std::uint32_t* make_offsets() const;
+
+        const std::uint32_t* p_offsets;  ///< Pointer to offset buffer
         friend class union_array_crtp_base<dense_union_array>;
     };
 
@@ -805,6 +910,9 @@ namespace sparrow
     public:
 
         using base_type = union_array_crtp_base<sparse_union_array>;
+        using const_iterator = typename base_type::const_iterator;
+        using size_type = typename base_type::size_type;
+        using typed_value = typename base_type::typed_value;
         using type_id_buffer_type = typename base_type::type_id_buffer_type;
 
         /**
@@ -845,8 +953,6 @@ namespace sparrow
         SPARROW_API sparse_union_array& operator=(const sparse_union_array&);
 
     private:
-
-        using type_id_map = typename base_type::type_id_map;
 
         /**
          * @brief Creates proxy for sparse union array from child arrays, type IDs, and optional type mapping.
@@ -913,6 +1019,11 @@ namespace sparrow
          * @post Used internally for element access in sparse layout
          */
         [[nodiscard]] SPARROW_API std::size_t element_offset(std::size_t i) const;
+
+        void insert_value(const_iterator pos, const typed_value& value, size_type count);
+
+        void erase_values(const_iterator pos, size_type count);
+
         friend class union_array_crtp_base<sparse_union_array>;
     };
 
@@ -925,6 +1036,7 @@ namespace sparrow
         -> type_id_map
     {
         type_id_map ret;
+        ret.fill(INVALID_CHILD_INDEX);
         // remove +du: / +su: prefix
         format_string.remove_prefix(4);
 
@@ -938,7 +1050,7 @@ namespace sparrow
                     std::string_view{&*std::ranges::begin(s), static_cast<size_t>(std::ranges::distance(s))}
                 );
                 const auto as_int = std::atoi(str.c_str());
-                ret[static_cast<std::size_t>(as_int)] = static_cast<std::uint8_t>(child_index);
+                ret[static_cast<std::size_t>(as_int)] = child_index;
                 ++child_index;
             }
         );
@@ -951,12 +1063,13 @@ namespace sparrow
     union_array_crtp_base<DERIVED>::type_id_map_from_child_to_type_id(const std::optional<R>& child_index_to_type_id)
         -> type_id_map
     {
-        std::array<std::uint8_t, TYPE_ID_MAP_SIZE> ret;
+        type_id_map ret;
+        ret.fill(INVALID_CHILD_INDEX);
         if (!child_index_to_type_id.has_value())
         {
-            constexpr std::array<std::uint8_t, TYPE_ID_MAP_SIZE> default_mapping = []
+            constexpr type_id_map default_mapping = []
             {
-                std::array<std::uint8_t, TYPE_ID_MAP_SIZE> arr{};
+                type_id_map arr{};
                 std::iota(arr.begin(), arr.end(), 0);
                 return arr;
             }();
@@ -967,7 +1080,7 @@ namespace sparrow
             const std::size_t n = std::ranges::size(*child_index_to_type_id);
             for (std::size_t i = 0; i < n; ++i)
             {
-                ret[(*child_index_to_type_id)[static_cast<std::uint8_t>(i)]] = static_cast<std::uint8_t>(i);
+                ret[(*child_index_to_type_id)[static_cast<std::uint8_t>(i)]] = i;
             }
         }
         return ret;
@@ -1019,6 +1132,16 @@ namespace sparrow
     }
 
     template <class DERIVED>
+    SPARROW_CONSTEXPR_CLANG auto union_array_crtp_base<DERIVED>::at(size_type i) const -> value_type
+    {
+        if (i >= size())
+        {
+            throw std::out_of_range("Union index out of range");
+        }
+        return (*this)[i];
+    }
+
+    template <class DERIVED>
     constexpr arrow_proxy& union_array_crtp_base<DERIVED>::get_arrow_proxy()
     {
         return m_proxy;
@@ -1033,7 +1156,7 @@ namespace sparrow
     template <class DERIVED>
     union_array_crtp_base<DERIVED>::union_array_crtp_base(arrow_proxy proxy)
         : m_proxy(std::move(proxy))
-        , p_type_ids(reinterpret_cast<std::uint8_t*>(m_proxy.buffers()[0 /*index of type-ids*/].data()))
+        , p_type_ids(make_type_ids())
         , m_children(make_children(m_proxy))
         , m_type_id_map(parse_type_id_map(m_proxy.format()))
     {
@@ -1051,7 +1174,7 @@ namespace sparrow
         if (this != &rhs)
         {
             m_proxy = rhs.m_proxy;
-            p_type_ids = reinterpret_cast<std::uint8_t*>(m_proxy.buffers()[0 /*index of type-ids*/].data());
+            refresh_type_id_cache();
             m_children = make_children(m_proxy);
             m_type_id_map = parse_type_id_map(m_proxy.format());
         }
@@ -1064,7 +1187,7 @@ namespace sparrow
         const auto type_id = static_cast<std::size_t>(p_type_ids[i]);
         const auto child_index = m_type_id_map[type_id];
         const auto offset = this->derived_cast().element_offset(i);
-        return array_element(*m_children[child_index], static_cast<std::size_t>(offset));
+        return m_children[child_index][static_cast<std::size_t>(offset)];
     }
 
     template <class DERIVED>
@@ -1083,6 +1206,118 @@ namespace sparrow
     constexpr bool union_array_crtp_base<DERIVED>::empty() const
     {
         return size() == 0;
+    }
+
+    template <class DERIVED>
+    auto union_array_crtp_base<DERIVED>::insert(const_iterator pos, const typed_value& value) -> iterator
+    {
+        return insert(pos, value, 1);
+    }
+
+    template <class DERIVED>
+    auto union_array_crtp_base<DERIVED>::insert(const_iterator pos, const typed_value& value, size_type count)
+        -> iterator
+    {
+        SPARROW_ASSERT_TRUE(pos >= cbegin());
+        SPARROW_ASSERT_TRUE(pos <= cend());
+
+        const size_type idx = static_cast<size_type>(std::distance(cbegin(), pos));
+        if (count == 0)
+        {
+            return sparrow::next(begin(), static_cast<std::ptrdiff_t>(idx));
+        }
+
+        this->derived_cast().insert_value(pos, value, count);
+        get_arrow_proxy().set_length(size() + count);
+        return sparrow::next(begin(), static_cast<std::ptrdiff_t>(idx));
+    }
+
+    template <class DERIVED>
+    template <std::input_iterator InputIt>
+        requires std::convertible_to<
+            typename std::iterator_traits<InputIt>::value_type,
+            typename union_array_crtp_base<DERIVED>::typed_value>
+    auto union_array_crtp_base<DERIVED>::insert(const_iterator pos, InputIt first, InputIt last) -> iterator
+    {
+        SPARROW_ASSERT_TRUE(pos >= cbegin());
+        SPARROW_ASSERT_TRUE(pos <= cend());
+
+        const size_type idx = static_cast<size_type>(std::distance(cbegin(), pos));
+        auto& proxy = get_arrow_proxy();
+        const size_type original_size = size();
+        size_type inserted_count = 0;
+
+        for (auto it = first; it != last; ++it)
+        {
+            const auto current_pos = sparrow::next(cbegin(), static_cast<std::ptrdiff_t>(idx + inserted_count));
+            this->derived_cast().insert_value(current_pos, static_cast<typed_value>(*it), 1);
+            ++inserted_count;
+            proxy.set_length(original_size + inserted_count);
+        }
+
+        return sparrow::next(begin(), static_cast<std::ptrdiff_t>(idx));
+    }
+
+    template <class DERIVED>
+    auto union_array_crtp_base<DERIVED>::erase(const_iterator pos) -> iterator
+    {
+        return erase(pos, sparrow::next(pos, 1));
+    }
+
+    template <class DERIVED>
+    auto union_array_crtp_base<DERIVED>::erase(const_iterator first, const_iterator last) -> iterator
+    {
+        SPARROW_ASSERT_TRUE(first >= cbegin());
+        SPARROW_ASSERT_TRUE(first <= cend());
+        SPARROW_ASSERT_TRUE(last >= first);
+        SPARROW_ASSERT_TRUE(last <= cend());
+
+        const size_type idx = static_cast<size_type>(std::distance(cbegin(), first));
+        const size_type count = static_cast<size_type>(std::distance(first, last));
+        if (count == 0)
+        {
+            return sparrow::next(begin(), static_cast<std::ptrdiff_t>(idx));
+        }
+
+        this->derived_cast().erase_values(first, count);
+        get_arrow_proxy().set_length(size() - count);
+        return sparrow::next(begin(), static_cast<std::ptrdiff_t>(idx));
+    }
+
+    template <class DERIVED>
+    void union_array_crtp_base<DERIVED>::push_back(const typed_value& value)
+    {
+        static_cast<void>(insert(cend(), value));
+    }
+
+    template <class DERIVED>
+    void union_array_crtp_base<DERIVED>::pop_back()
+    {
+        SPARROW_ASSERT_TRUE(!empty());
+        static_cast<void>(erase(sparrow::next(cbegin(), static_cast<std::ptrdiff_t>(size() - 1))));
+    }
+
+    template <class DERIVED>
+    void union_array_crtp_base<DERIVED>::resize(size_type new_length, const typed_value& value)
+    {
+        const size_type current_size = size();
+        if (new_length < current_size)
+        {
+            static_cast<void>(erase(sparrow::next(cbegin(), static_cast<std::ptrdiff_t>(new_length)), cend()));
+        }
+        else if (new_length > current_size)
+        {
+            static_cast<void>(insert(cend(), value, new_length - current_size));
+        }
+    }
+
+    template <class DERIVED>
+    void union_array_crtp_base<DERIVED>::clear()
+    {
+        if (!empty())
+        {
+            static_cast<void>(erase(cbegin(), cend()));
+        }
     }
 
     template <class DERIVED>
@@ -1158,14 +1393,335 @@ namespace sparrow
     }
 
     template <class DERIVED>
+    void union_array_crtp_base<DERIVED>::throw_if_sliced_for_mutation(const char* operation) const
+    {
+        if (get_arrow_proxy().offset() != 0)
+        {
+            throw std::logic_error(std::string(operation) + " does not support sliced arrays (non-zero offset)");
+        }
+    }
+
+    template <class DERIVED>
+    auto union_array_crtp_base<DERIVED>::child_index_from_type_id(std::uint8_t type_id) const -> size_type
+    {
+        const size_type child_index = m_type_id_map[static_cast<size_type>(type_id)];
+        if (child_index == INVALID_CHILD_INDEX || child_index >= m_children.size())
+        {
+            throw std::out_of_range("Unknown union type id");
+        }
+        return child_index;
+    }
+
+    template <class DERIVED>
+    bool union_array_crtp_base<DERIVED>::child_is_nullable(size_type child_index) const
+    {
+        return m_proxy.children()[child_index].flags().contains(ArrowFlag::NULLABLE);
+    }
+
+    template <class DERIVED>
+    auto union_array_crtp_base<DERIVED>::make_type_ids() const -> const std::uint8_t*
+    {
+        return m_proxy.buffers()[TYPE_IDS_BUFFER_INDEX].template data<std::uint8_t>()
+               + static_cast<size_type>(m_proxy.offset());
+    }
+
+    template <class DERIVED>
+    void union_array_crtp_base<DERIVED>::refresh_type_id_cache()
+    {
+        p_type_ids = make_type_ids();
+    }
+
+    template <class DERIVED>
+    array& union_array_crtp_base<DERIVED>::raw_child_wrapper(size_type child_index)
+    {
+        return m_children[child_index];
+    }
+
+    template <class DERIVED>
+    const array& union_array_crtp_base<DERIVED>::child_wrapper(size_type child_index) const
+    {
+        return m_children[child_index];
+    }
+
+    template <class DERIVED>
+    void union_array_crtp_base<DERIVED>::validate_child_insert_value(
+        const array& child,
+        const array_traits::value_type& value
+    ) const
+    {
+        detail::validate_union_child_insert_value(child, value);
+    }
+
+    template <class DERIVED>
+    void union_array_crtp_base<DERIVED>::validate_child_erase(const array& child) const
+    {
+        detail::validate_union_child_erase(child);
+    }
+
+    template <class DERIVED>
+    void union_array_crtp_base<DERIVED>::insert_child_value(
+        array& child,
+        size_type pos,
+        const array_traits::value_type& value,
+        size_type count
+    ) const
+    {
+        detail::insert_union_child_value(child, pos, value, count);
+    }
+
+    template <class DERIVED>
+    auto union_array_crtp_base<DERIVED>::make_inactive_child_value(size_type child_index) const
+        -> array_traits::value_type
+    {
+        return detail::make_union_child_default_value(child_wrapper(child_index), !child_is_nullable(child_index));
+    }
+
+    template <class DERIVED>
     constexpr auto union_array_crtp_base<DERIVED>::make_children(arrow_proxy& proxy) -> children_type
     {
-        children_type children(proxy.children().size(), nullptr);
-        for (std::size_t i = 0; i < children.size(); ++i)
+        children_type children;
+        children.reserve(proxy.children().size());
+        for (std::size_t i = 0; i < proxy.children().size(); ++i)
         {
-            children[i] = array_factory(proxy.children()[i].view());
+            auto& child_proxy = proxy.children()[i];
+            children.emplace_back(&child_proxy.array(), &child_proxy.schema());
         }
         return children;
+    }
+
+    inline auto dense_union_array::make_offsets() const -> const std::uint32_t*
+    {
+        return this->get_arrow_proxy().buffers()[OFFSETS_BUFFER_INDEX].template data<std::uint32_t>()
+               + static_cast<size_type>(this->get_arrow_proxy().offset());
+    }
+
+    inline auto dense_union_array::child_offset_before(size_type end_index, std::uint8_t type_id) const
+        -> size_type
+    {
+        size_type offset = 0;
+        for (size_type i = 0; i < end_index; ++i)
+        {
+            if (this->p_type_ids[i] == type_id)
+            {
+                ++offset;
+            }
+        }
+        return offset;
+    }
+
+    inline void dense_union_array::throw_if_offsets_are_not_canonical_for_mutation(const char* operation) const
+    {
+        std::vector<size_type> child_offsets(this->m_children.size(), 0);
+
+        for (size_type i = 0; i < this->size(); ++i)
+        {
+            const auto child_index = this->child_index_from_type_id(this->p_type_ids[i]);
+            if (static_cast<size_type>(p_offsets[i]) != child_offsets[child_index])
+            {
+                throw std::logic_error(std::string(operation) + " requires canonical dense-union offsets");
+            }
+            ++child_offsets[child_index];
+        }
+
+        for (size_type child_index = 0; child_index < child_offsets.size(); ++child_index)
+        {
+            if (child_offsets[child_index] != this->child_wrapper(child_index).size())
+            {
+                throw std::logic_error(std::string(operation) + " requires densely packed child arrays");
+            }
+        }
+    }
+
+    inline void dense_union_array::recompute_offsets(size_type new_length)
+    {
+        auto& proxy = this->get_arrow_proxy();
+        auto& type_id_buffer = proxy.get_array_private_data()->buffers()[TYPE_IDS_BUFFER_INDEX];
+        auto type_id_adaptor = make_buffer_adaptor<std::uint8_t>(type_id_buffer);
+
+        auto& offset_buffer = proxy.get_array_private_data()->buffers()[OFFSETS_BUFFER_INDEX];
+        auto offset_adaptor = make_buffer_adaptor<std::uint32_t>(offset_buffer);
+        offset_adaptor.resize(new_length);
+
+        std::vector<size_type> child_offsets(this->m_children.size(), 0);
+        constexpr size_type max_offset = static_cast<size_type>(std::numeric_limits<std::uint32_t>::max());
+
+        for (size_type i = 0; i < new_length; ++i)
+        {
+            const auto child_index = this->child_index_from_type_id(type_id_adaptor[i]);
+            SPARROW_ASSERT_TRUE(child_offsets[child_index] <= max_offset);
+            offset_adaptor[i] = static_cast<std::uint32_t>(child_offsets[child_index]++);
+        }
+
+        for (size_type child_index = 0; child_index < child_offsets.size(); ++child_index)
+        {
+            SPARROW_ASSERT_TRUE(child_offsets[child_index] == this->child_wrapper(child_index).size());
+        }
+    }
+
+    inline void dense_union_array::insert_value(const_iterator pos, const typed_value& value, size_type count)
+    {
+        if (count == 0)
+        {
+            return;
+        }
+
+        const size_type idx = static_cast<size_type>(std::distance(this->cbegin(), pos));
+        this->throw_if_sliced_for_mutation("dense_union_array::insert_value");
+        throw_if_offsets_are_not_canonical_for_mutation("dense_union_array::insert_value");
+
+        const auto child_index = this->child_index_from_type_id(value.type_id);
+        this->validate_child_insert_value(this->child_wrapper(child_index), value.value);
+
+        const size_type child_insert_pos = child_offset_before(idx, value.type_id);
+        this->insert_child_value(this->raw_child_wrapper(child_index), child_insert_pos, value.value, count);
+
+        auto& proxy = this->get_arrow_proxy();
+        auto& type_id_buffer = proxy.get_array_private_data()->buffers()[TYPE_IDS_BUFFER_INDEX];
+        auto type_id_adaptor = make_buffer_adaptor<std::uint8_t>(type_id_buffer);
+        type_id_adaptor.insert(
+            sparrow::next(type_id_adaptor.cbegin(), static_cast<std::ptrdiff_t>(idx)),
+            count,
+            value.type_id
+        );
+
+        recompute_offsets(type_id_adaptor.size());
+        proxy.update_buffers();
+        this->refresh_type_id_cache();
+        p_offsets = make_offsets();
+    }
+
+    inline void dense_union_array::erase_values(const_iterator pos, size_type count)
+    {
+        if (count == 0)
+        {
+            return;
+        }
+
+        const size_type idx = static_cast<size_type>(std::distance(this->cbegin(), pos));
+        this->throw_if_sliced_for_mutation("dense_union_array::erase_values");
+        throw_if_offsets_are_not_canonical_for_mutation("dense_union_array::erase_values");
+
+        std::vector<size_type> prefix_counts(this->m_children.size(), 0);
+        for (size_type i = 0; i < idx; ++i)
+        {
+            ++prefix_counts[this->child_index_from_type_id(this->p_type_ids[i])];
+        }
+
+        std::vector<size_type> erase_counts(this->m_children.size(), 0);
+        for (size_type i = idx; i < idx + count; ++i)
+        {
+            ++erase_counts[this->child_index_from_type_id(this->p_type_ids[i])];
+        }
+
+        for (size_type child_index = 0; child_index < erase_counts.size(); ++child_index)
+        {
+            if (erase_counts[child_index] != 0)
+            {
+                this->validate_child_erase(this->child_wrapper(child_index));
+            }
+        }
+
+        for (size_type child_index = 0; child_index < erase_counts.size(); ++child_index)
+        {
+            if (erase_counts[child_index] != 0)
+            {
+                auto& child = this->raw_child_wrapper(child_index);
+                child.erase(
+                    child.cbegin() + static_cast<std::ptrdiff_t>(prefix_counts[child_index]),
+                    child.cbegin()
+                        + static_cast<std::ptrdiff_t>(prefix_counts[child_index] + erase_counts[child_index])
+                );
+            }
+        }
+
+        auto& proxy = this->get_arrow_proxy();
+        auto& type_id_buffer = proxy.get_array_private_data()->buffers()[TYPE_IDS_BUFFER_INDEX];
+        auto type_id_adaptor = make_buffer_adaptor<std::uint8_t>(type_id_buffer);
+        type_id_adaptor.erase(
+            sparrow::next(type_id_adaptor.cbegin(), static_cast<std::ptrdiff_t>(idx)),
+            sparrow::next(type_id_adaptor.cbegin(), static_cast<std::ptrdiff_t>(idx + count))
+        );
+
+        recompute_offsets(type_id_adaptor.size());
+        proxy.update_buffers();
+        this->refresh_type_id_cache();
+        p_offsets = make_offsets();
+    }
+
+    inline void sparse_union_array::insert_value(const_iterator pos, const typed_value& value, size_type count)
+    {
+        if (count == 0)
+        {
+            return;
+        }
+
+        const size_type idx = static_cast<size_type>(std::distance(this->cbegin(), pos));
+        this->throw_if_sliced_for_mutation("sparse_union_array::insert_value");
+
+        const auto active_child_index = this->child_index_from_type_id(value.type_id);
+        std::vector<array_traits::value_type> child_values;
+        child_values.reserve(this->m_children.size());
+
+        for (size_type child_index = 0; child_index < this->m_children.size(); ++child_index)
+        {
+            child_values.push_back(
+                child_index == active_child_index ? value.value : this->make_inactive_child_value(child_index)
+            );
+            this->validate_child_insert_value(this->child_wrapper(child_index), child_values.back());
+        }
+
+        for (size_type child_index = 0; child_index < this->m_children.size(); ++child_index)
+        {
+            this->insert_child_value(this->raw_child_wrapper(child_index), idx, child_values[child_index], count);
+        }
+
+        auto& proxy = this->get_arrow_proxy();
+        auto& type_id_buffer = proxy.get_array_private_data()->buffers()[TYPE_IDS_BUFFER_INDEX];
+        auto type_id_adaptor = make_buffer_adaptor<std::uint8_t>(type_id_buffer);
+        type_id_adaptor.insert(
+            sparrow::next(type_id_adaptor.cbegin(), static_cast<std::ptrdiff_t>(idx)),
+            count,
+            value.type_id
+        );
+
+        proxy.update_buffers();
+        this->refresh_type_id_cache();
+    }
+
+    inline void sparse_union_array::erase_values(const_iterator pos, size_type count)
+    {
+        if (count == 0)
+        {
+            return;
+        }
+
+        const size_type idx = static_cast<size_type>(std::distance(this->cbegin(), pos));
+        this->throw_if_sliced_for_mutation("sparse_union_array::erase_values");
+
+        for (size_type child_index = 0; child_index < this->m_children.size(); ++child_index)
+        {
+            this->validate_child_erase(this->child_wrapper(child_index));
+        }
+
+        for (size_type child_index = 0; child_index < this->m_children.size(); ++child_index)
+        {
+            auto& child = this->raw_child_wrapper(child_index);
+            child.erase(
+                child.cbegin() + static_cast<std::ptrdiff_t>(idx),
+                child.cbegin() + static_cast<std::ptrdiff_t>(idx + count)
+            );
+        }
+
+        auto& proxy = this->get_arrow_proxy();
+        auto& type_id_buffer = proxy.get_array_private_data()->buffers()[TYPE_IDS_BUFFER_INDEX];
+        auto type_id_adaptor = make_buffer_adaptor<std::uint8_t>(type_id_buffer);
+        type_id_adaptor.erase(
+            sparrow::next(type_id_adaptor.cbegin(), static_cast<std::ptrdiff_t>(idx)),
+            sparrow::next(type_id_adaptor.cbegin(), static_cast<std::ptrdiff_t>(idx + count))
+        );
+
+        proxy.update_buffers();
+        this->refresh_type_id_cache();
     }
 
     template <class D>

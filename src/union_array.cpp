@@ -16,11 +16,159 @@
 
 #include "sparrow/array.hpp"
 #include "sparrow/debug/copy_tracker.hpp"
+#include "sparrow/layout/array_registry.hpp"
 #include "sparrow/utils/metadata.hpp"
 #include "sparrow/utils/repeat_container.hpp"
 
 namespace sparrow
 {
+    namespace
+    {
+        template <class ARRAY>
+        constexpr bool supports_union_insert_v = is_nullable_v<typename ARRAY::value_type>
+                                                 && requires(
+                                                     ARRAY& array,
+                                                     typename ARRAY::const_iterator pos,
+                                                     const typename ARRAY::value_type& typed_value,
+                                                     std::size_t count
+                                                 ) { array.insert(pos, typed_value, count); };
+
+        template <class ARRAY>
+        constexpr bool supports_union_erase_v = requires(
+            ARRAY& array,
+            typename ARRAY::const_iterator first,
+            typename ARRAY::const_iterator last
+        ) { array.erase(first, last); };
+    }
+
+    namespace detail
+    {
+        void validate_union_child_insert_value(const array& child, const array_traits::value_type& value)
+        {
+            using value_variant_type = typename array_traits::value_type::base_type;
+
+            child.visit(
+                [&](const auto& child_impl)
+                {
+                    using child_array_type = std::decay_t<decltype(child_impl)>;
+                    if constexpr (supports_union_insert_v<child_array_type>)
+                    {
+                        bool matched = false;
+                        std::visit(
+                            [&](const auto& typed_value)
+                            {
+                                if constexpr (std::same_as<std::decay_t<decltype(typed_value)>, typename child_array_type::value_type>)
+                                {
+                                    matched = true;
+                                }
+                            },
+                            static_cast<const value_variant_type&>(value)
+                        );
+
+                        if (!matched)
+                        {
+                            throw std::invalid_argument(
+                                "union_array value type does not match the selected child array"
+                            );
+                        }
+                    }
+                    else
+                    {
+                        throw std::runtime_error(
+                            "union_array mutability requires child arrays that support insert(value, count)"
+                        );
+                    }
+                }
+            );
+        }
+
+        void validate_union_child_erase(const array& child)
+        {
+            child.visit(
+                [](const auto& child_impl)
+                {
+                    using child_array_type = std::decay_t<decltype(child_impl)>;
+                    if constexpr (!supports_union_erase_v<child_array_type>)
+                    {
+                        throw std::runtime_error(
+                            "union_array mutability requires child arrays that support erase(first, last)"
+                        );
+                    }
+                }
+            );
+        }
+
+        void
+        insert_union_child_value(array& child, std::size_t pos, const array_traits::value_type& value, std::size_t count)
+        {
+            using value_variant_type = typename array_traits::value_type::base_type;
+
+            child.visit(
+                [&](const auto& child_impl)
+                {
+                    using child_array_type = std::decay_t<decltype(child_impl)>;
+                    if constexpr (supports_union_insert_v<child_array_type>)
+                    {
+                        bool inserted = false;
+                        std::visit(
+                            [&](const auto& typed_value)
+                            {
+                                if constexpr (std::same_as<std::decay_t<decltype(typed_value)>, typename child_array_type::value_type>)
+                                {
+                                    auto& mutable_child = const_cast<child_array_type&>(child_impl);
+                                    auto insert_pos = std::next(
+                                        mutable_child.cbegin(),
+                                        static_cast<std::ptrdiff_t>(pos)
+                                    );
+                                    mutable_child.insert(insert_pos, typed_value, count);
+                                    inserted = true;
+                                }
+                            },
+                            static_cast<const value_variant_type&>(value)
+                        );
+
+                        if (!inserted)
+                        {
+                            throw std::invalid_argument(
+                                "union_array value type does not match the selected child array"
+                            );
+                        }
+                    }
+                    else
+                    {
+                        throw std::runtime_error(
+                            "union_array mutability requires child arrays that support insert(value, count)"
+                        );
+                    }
+                }
+            );
+        }
+
+        auto make_union_child_default_value(const array& child, bool is_valid) -> array_traits::value_type
+        {
+            return child.visit(
+                [is_valid](const auto& child_impl) -> array_traits::value_type
+                {
+                    using child_array_type = std::decay_t<decltype(child_impl)>;
+                    if constexpr (is_nullable_v<typename child_array_type::value_type>)
+                    {
+                        using child_inner_value_type = typename child_array_type::inner_value_type;
+                        using child_value_type = typename child_array_type::value_type;
+                        return array_traits::value_type(
+                            child_value_type(child_inner_value_type{}, static_cast<bool>(is_valid))
+                        );
+                    }
+                    else
+                    {
+                        throw std::runtime_error(
+                            "union_array sparse mutation does not support union child arrays"
+                        );
+                    }
+                }
+            );
+        }
+    }
+
     namespace copy_tracker
     {
         template <>
@@ -47,7 +195,7 @@ namespace sparrow
 
     dense_union_array::dense_union_array(arrow_proxy proxy)
         : base_type(std::move(proxy))
-        , p_offsets(reinterpret_cast<std::int32_t*>(m_proxy.buffers()[1 /*index of offsets*/].data()))
+        , p_offsets(make_offsets())
     {
     }
 
@@ -63,7 +211,7 @@ namespace sparrow
         if (this != &rhs)
         {
             base_type::operator=(rhs);
-            p_offsets = reinterpret_cast<std::int32_t*>(m_proxy.buffers()[1 /*index of offsets*/].data());
+            p_offsets = make_offsets();
         }
         return *this;
     }
@@ -74,7 +222,7 @@ namespace sparrow
 
     std::size_t dense_union_array::element_offset(std::size_t i) const
     {
-        return static_cast<std::size_t>(p_offsets[i]) + m_proxy.offset();
+        return static_cast<std::size_t>(p_offsets[i]);
     }
 
     /*************************************

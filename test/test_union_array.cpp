@@ -29,6 +29,38 @@ namespace sparrow
 
     namespace test
     {
+        template <class UnionArray>
+        auto make_float32_typed_value(float32_t value, bool valid = true) -> typename UnionArray::typed_value
+        {
+            return
+                typename UnionArray::typed_value(3, nullable<float32_t, bool>(value, static_cast<bool>(valid)));
+        }
+
+        template <class UnionArray>
+        auto make_uint16_typed_value(std::uint16_t value, bool valid = true) -> typename UnionArray::typed_value
+        {
+            return typename UnionArray::typed_value(
+                4,
+                nullable<std::uint16_t, bool>(value, static_cast<bool>(valid))
+            );
+        }
+
+        template <class UnionArray>
+        auto get_float_child(const UnionArray& array) -> primitive_array<float32_t>
+        {
+            return primitive_array<float32_t>(
+                ::sparrow::detail::array_access::get_arrow_proxy(array).children()[0].view()
+            );
+        }
+
+        template <class UnionArray>
+        auto get_uint16_child(const UnionArray& array) -> primitive_array<std::uint16_t>
+        {
+            return primitive_array<std::uint16_t>(
+                ::sparrow::detail::array_access::get_arrow_proxy(array).children()[1].view()
+            );
+        }
+
         arrow_proxy
         make_sparse_union_proxy(const std::string& format_string, std::size_t n, bool altered = false)
         {
@@ -103,6 +135,65 @@ namespace sparrow
             );
 
             return arrow_proxy(std::move(arr), std::move(schema));
+        }
+
+        arrow_proxy make_noncanonical_dense_union_proxy()
+        {
+            std::vector<ArrowArray> children_arrays(2);
+            std::vector<ArrowSchema> children_schemas(2);
+
+            test::fill_schema_and_array<float32_t>(children_schemas[0], children_arrays[0], 2, 0 /*offset*/, {});
+            children_schemas[0].name = "item 0";
+
+            test::fill_schema_and_array<std::uint16_t>(children_schemas[1], children_arrays[1], 2, 0 /*offset*/, {});
+            children_schemas[1].name = "item 1";
+
+            ArrowArray arr{};
+            ArrowSchema schema{};
+
+            test::fill_schema_and_array_for_dense_union(
+                schema,
+                arr,
+                std::move(children_schemas),
+                std::move(children_arrays),
+                std::vector<std::uint8_t>{std::uint8_t(3), std::uint8_t(4), std::uint8_t(3), std::uint8_t(4)},
+                std::vector<std::int32_t>{1, 0, 0, 1},
+                "+ud:3,4"
+            );
+
+            return arrow_proxy(std::move(arr), std::move(schema));
+        }
+
+        sparse_union_array make_non_nullable_sparse_union_array()
+        {
+            primitive_array<float32_t> arr1({float32_t(0.0f), float32_t(2.0f)}, false);
+            primitive_array<std::uint16_t> arr2({std::uint16_t(1), std::uint16_t(3)}, false);
+
+            std::vector<array> children = {array(std::move(arr1)), array(std::move(arr2))};
+            sparse_union_array::type_id_buffer_type type_ids{{std::uint8_t(3), std::uint8_t(4)}};
+            std::vector<std::size_t> type_mapping{3, 4};
+
+            return sparse_union_array(
+                std::move(children),
+                std::move(type_ids),
+                std::make_optional(std::move(type_mapping))
+            );
+        }
+
+        sparse_union_array make_nullable_sparse_union_array()
+        {
+            primitive_array<float32_t> arr1({float32_t(0.0f), float32_t(2.0f)}, true);
+            primitive_array<std::uint16_t> arr2({std::uint16_t(1), std::uint16_t(3)}, true);
+
+            std::vector<array> children = {array(std::move(arr1)), array(std::move(arr2))};
+            sparse_union_array::type_id_buffer_type type_ids{{std::uint8_t(3), std::uint8_t(4)}};
+            std::vector<std::size_t> type_mapping{3, 4};
+
+            return sparse_union_array(
+                std::move(children),
+                std::move(type_ids),
+                std::make_optional(std::move(type_mapping))
+            );
         }
     }
 
@@ -328,6 +419,180 @@ namespace sparrow
             CHECK_EQ(formatted, expected);
         }
 #endif
+    }
+
+    TEST_SUITE("sparse_union_mutable")
+    {
+        TEST_CASE("insert fills inactive nullable children with null")
+        {
+            auto arr = test::make_nullable_sparse_union_array();
+
+            static_cast<void>(arr.insert(
+                sparrow::next(arr.cbegin(), 1),
+                test::make_uint16_typed_value<sparse_union_array>(std::uint16_t(99))
+            ));
+
+            REQUIRE_EQ(arr.size(), 3u);
+            CHECK_NULLABLE_VARIANT_EQ(arr[1], std::uint16_t(99));
+
+            const auto child0 = test::get_float_child(arr);
+            const auto child1 = test::get_uint16_child(arr);
+            REQUIRE_EQ(child0.size(), 3u);
+            REQUIRE_EQ(child1.size(), 3u);
+            CHECK_FALSE(child0[1].has_value());
+            CHECK(child1[1].has_value());
+            CHECK_EQ(child1[1].value(), std::uint16_t(99));
+        }
+
+        TEST_CASE("insert fills inactive non nullable children with defaults")
+        {
+            auto arr = test::make_non_nullable_sparse_union_array();
+
+            static_cast<void>(arr.insert(
+                sparrow::next(arr.cbegin(), 1),
+                test::make_uint16_typed_value<sparse_union_array>(std::uint16_t(99))
+            ));
+
+            REQUIRE_EQ(arr.size(), 3u);
+            CHECK_NULLABLE_VARIANT_EQ(arr[1], std::uint16_t(99));
+
+            const auto child0 = test::get_float_child(arr);
+            const auto child1 = test::get_uint16_child(arr);
+            REQUIRE_EQ(child0.size(), 3u);
+            REQUIRE_EQ(child1.size(), 3u);
+            CHECK(child0[1].has_value());
+            CHECK_EQ(child0[1].value(), 0.0f);
+            CHECK(child1[1].has_value());
+            CHECK_EQ(child1[1].value(), std::uint16_t(99));
+        }
+
+        TEST_CASE("push_back appends value")
+        {
+            auto arr = test::make_nullable_sparse_union_array();
+
+            arr.push_back(test::make_float32_typed_value<sparse_union_array>(42.0f));
+
+            REQUIRE_EQ(arr.size(), 3u);
+            CHECK_NULLABLE_VARIANT_EQ(arr[2], float32_t(42.0f));
+
+            const auto child0 = test::get_float_child(arr);
+            const auto child1 = test::get_uint16_child(arr);
+            REQUIRE_EQ(child0.size(), 3u);
+            REQUIRE_EQ(child1.size(), 3u);
+            CHECK(child0[2].has_value());
+            CHECK_EQ(child0[2].value(), 42.0f);
+            CHECK_FALSE(child1[2].has_value());
+        }
+
+        TEST_CASE("pop_back removes last value")
+        {
+            auto proxy = test::make_sparse_union_proxy("+us:3,4", 4);
+            sparse_union_array arr(std::move(proxy));
+
+            arr.pop_back();
+
+            REQUIRE_EQ(arr.size(), 3u);
+            CHECK_NULLABLE_VARIANT_EQ(arr[0], float32_t(0.0f));
+            CHECK_NULLABLE_VARIANT_EQ(arr[1], std::uint16_t(1));
+            CHECK_NULLABLE_VARIANT_EQ(arr[2], float32_t(2.0f));
+
+            const auto child0 = test::get_float_child(arr);
+            const auto child1 = test::get_uint16_child(arr);
+            REQUIRE_EQ(child0.size(), 3u);
+            REQUIRE_EQ(child1.size(), 3u);
+            CHECK_EQ(child0[2].value(), 2.0f);
+            CHECK_EQ(child1[2].value(), std::uint16_t(2));
+        }
+
+        TEST_CASE("erase removes value and compacts children")
+        {
+            auto proxy = test::make_sparse_union_proxy("+us:3,4", 4);
+            sparse_union_array arr(std::move(proxy));
+
+            static_cast<void>(arr.erase(sparrow::next(arr.cbegin(), 1)));
+            REQUIRE_EQ(arr.size(), 3u);
+            CHECK_NULLABLE_VARIANT_EQ(arr[0], float32_t(0.0f));
+            CHECK_NULLABLE_VARIANT_EQ(arr[1], float32_t(2.0f));
+            CHECK_NULLABLE_VARIANT_EQ(arr[2], std::uint16_t(3));
+
+            const auto child0 = test::get_float_child(arr);
+            const auto child1 = test::get_uint16_child(arr);
+            REQUIRE_EQ(child0.size(), 3u);
+            REQUIRE_EQ(child1.size(), 3u);
+            CHECK_EQ(child0[0].value(), 0.0f);
+            CHECK_EQ(child0[1].value(), 2.0f);
+            CHECK_EQ(child0[2].value(), 3.0f);
+            CHECK_EQ(child1[0].value(), std::uint16_t(0));
+            CHECK_EQ(child1[1].value(), std::uint16_t(2));
+            CHECK_EQ(child1[2].value(), std::uint16_t(3));
+        }
+
+        TEST_CASE("resize grows with fill value")
+        {
+            auto proxy = test::make_sparse_union_proxy("+us:3,4", 4);
+            sparse_union_array arr(std::move(proxy));
+
+            arr.resize(6, test::make_uint16_typed_value<sparse_union_array>(std::uint16_t(11)));
+
+            REQUIRE_EQ(arr.size(), 6u);
+            CHECK_NULLABLE_VARIANT_EQ(arr[4], std::uint16_t(11));
+            CHECK_NULLABLE_VARIANT_EQ(arr[5], std::uint16_t(11));
+
+            const auto child0 = test::get_float_child(arr);
+            const auto child1 = test::get_uint16_child(arr);
+            REQUIRE_EQ(child0.size(), 6u);
+            REQUIRE_EQ(child1.size(), 6u);
+        }
+
+        TEST_CASE("resize shrinks array")
+        {
+            auto proxy = test::make_sparse_union_proxy("+us:3,4", 4);
+            sparse_union_array arr(std::move(proxy));
+
+            arr.resize(2, test::make_uint16_typed_value<sparse_union_array>(std::uint16_t(11)));
+
+            REQUIRE_EQ(arr.size(), 2u);
+            CHECK_NULLABLE_VARIANT_EQ(arr[0], float32_t(0.0f));
+            CHECK_NULLABLE_VARIANT_EQ(arr[1], std::uint16_t(1));
+
+            const auto child0 = test::get_float_child(arr);
+            const auto child1 = test::get_uint16_child(arr);
+            REQUIRE_EQ(child0.size(), 2u);
+            REQUIRE_EQ(child1.size(), 2u);
+        }
+
+        TEST_CASE("clear removes all values")
+        {
+            auto proxy = test::make_sparse_union_proxy("+us:3,4", 4);
+            sparse_union_array arr(std::move(proxy));
+
+            arr.clear();
+            CHECK(arr.empty());
+
+            const auto child0 = test::get_float_child(arr);
+            const auto child1 = test::get_uint16_child(arr);
+            CHECK(child0.empty());
+            CHECK(child1.empty());
+        }
+
+        TEST_CASE("insert on slice is unsupported")
+        {
+            sparse_union_array original(test::make_sparse_union_proxy("+us:3,4", 4));
+            sparse_union_array sliced(detail::array_access::get_arrow_proxy(original).slice(1, 2));
+
+            CHECK_THROWS_AS(
+                sliced.insert(sliced.cbegin(), test::make_float32_typed_value<sparse_union_array>(7.0f)),
+                std::logic_error
+            );
+        }
+
+        TEST_CASE("erase on slice is unsupported")
+        {
+            sparse_union_array original(test::make_sparse_union_proxy("+us:3,4", 4));
+            sparse_union_array sliced(detail::array_access::get_arrow_proxy(original).slice(1, 2));
+
+            CHECK_THROWS_AS(sliced.erase(sliced.cbegin()), std::logic_error);
+        }
     }
 
     TEST_SUITE("dense_union")
@@ -557,5 +822,194 @@ namespace sparrow
             CHECK_EQ(formatted, expected);
         }
 #endif
+    }
+
+    TEST_SUITE("dense_union_mutable")
+    {
+        TEST_CASE("insert recomputes dense offsets")
+        {
+            auto proxy = test::make_dense_union_proxy("+ud:3,4", 2);
+            dense_union_array arr(std::move(proxy));
+
+            static_cast<void>(arr.insert(
+                sparrow::next(arr.cbegin(), 1),
+                test::make_float32_typed_value<dense_union_array>(9.5f)
+            ));
+
+            REQUIRE_EQ(arr.size(), 5u);
+            CHECK_NULLABLE_VARIANT_EQ(arr[0], float32_t(0.0f));
+            CHECK_NULLABLE_VARIANT_EQ(arr[1], float32_t(9.5f));
+            CHECK_NULLABLE_VARIANT_EQ(arr[2], std::uint16_t(0));
+            CHECK_NULLABLE_VARIANT_EQ(arr[3], float32_t(1.0f));
+            CHECK_NULLABLE_VARIANT_EQ(arr[4], std::uint16_t(1));
+
+            {
+                const auto child0 = test::get_float_child(arr);
+                const auto child1 = test::get_uint16_child(arr);
+                REQUIRE_EQ(child0.size(), 3u);
+                REQUIRE_EQ(child1.size(), 2u);
+                CHECK_EQ(child0[0].value(), 0.0f);
+                CHECK_EQ(child0[1].value(), 9.5f);
+                CHECK_EQ(child0[2].value(), 1.0f);
+                CHECK_EQ(child1[0].value(), std::uint16_t(0));
+                CHECK_EQ(child1[1].value(), std::uint16_t(1));
+            }
+        }
+
+        TEST_CASE("push_back appends value and recomputes dense offsets")
+        {
+            auto proxy = test::make_dense_union_proxy("+ud:3,4", 2);
+            dense_union_array arr(std::move(proxy));
+
+            arr.push_back(test::make_uint16_typed_value<dense_union_array>(std::uint16_t(77)));
+
+            REQUIRE_EQ(arr.size(), 5u);
+            CHECK_NULLABLE_VARIANT_EQ(arr[0], float32_t(0.0f));
+            CHECK_NULLABLE_VARIANT_EQ(arr[1], std::uint16_t(0));
+            CHECK_NULLABLE_VARIANT_EQ(arr[2], float32_t(1.0f));
+            CHECK_NULLABLE_VARIANT_EQ(arr[3], std::uint16_t(1));
+            CHECK_NULLABLE_VARIANT_EQ(arr[4], std::uint16_t(77));
+
+            const auto child0 = test::get_float_child(arr);
+            const auto child1 = test::get_uint16_child(arr);
+            REQUIRE_EQ(child0.size(), 2u);
+            REQUIRE_EQ(child1.size(), 3u);
+            CHECK_EQ(child1[0].value(), std::uint16_t(0));
+            CHECK_EQ(child1[1].value(), std::uint16_t(1));
+            CHECK_EQ(child1[2].value(), std::uint16_t(77));
+        }
+
+        TEST_CASE("pop_back removes last value and recomputes dense offsets")
+        {
+            auto proxy = test::make_dense_union_proxy("+ud:3,4", 2);
+            dense_union_array arr(std::move(proxy));
+
+            arr.pop_back();
+
+            REQUIRE_EQ(arr.size(), 3u);
+            CHECK_NULLABLE_VARIANT_EQ(arr[0], float32_t(0.0f));
+            CHECK_NULLABLE_VARIANT_EQ(arr[1], std::uint16_t(0));
+            CHECK_NULLABLE_VARIANT_EQ(arr[2], float32_t(1.0f));
+
+            const auto child0 = test::get_float_child(arr);
+            const auto child1 = test::get_uint16_child(arr);
+            REQUIRE_EQ(child0.size(), 2u);
+            REQUIRE_EQ(child1.size(), 1u);
+            CHECK_EQ(child1[0].value(), std::uint16_t(0));
+        }
+
+        TEST_CASE("erase recomputes dense offsets")
+        {
+            auto proxy = test::make_dense_union_proxy("+ud:3,4", 2);
+            dense_union_array arr(std::move(proxy));
+
+            static_cast<void>(arr.erase(sparrow::next(arr.cbegin(), 2)));
+
+            REQUIRE_EQ(arr.size(), 3u);
+            CHECK_NULLABLE_VARIANT_EQ(arr[0], float32_t(0.0f));
+            CHECK_NULLABLE_VARIANT_EQ(arr[1], std::uint16_t(0));
+            CHECK_NULLABLE_VARIANT_EQ(arr[2], std::uint16_t(1));
+
+            {
+                const auto child0 = test::get_float_child(arr);
+                const auto child1 = test::get_uint16_child(arr);
+                REQUIRE_EQ(child0.size(), 1u);
+                REQUIRE_EQ(child1.size(), 2u);
+                CHECK_EQ(child0[0].value(), 0.0f);
+                CHECK_EQ(child1[0].value(), std::uint16_t(0));
+                CHECK_EQ(child1[1].value(), std::uint16_t(1));
+            }
+        }
+
+        TEST_CASE("resize shrinks dense union")
+        {
+            auto proxy = test::make_dense_union_proxy("+ud:3,4", 2);
+            dense_union_array arr(std::move(proxy));
+
+            arr.resize(3, test::make_uint16_typed_value<dense_union_array>(std::uint16_t(11)));
+
+            REQUIRE_EQ(arr.size(), 3u);
+            CHECK_NULLABLE_VARIANT_EQ(arr[0], float32_t(0.0f));
+            CHECK_NULLABLE_VARIANT_EQ(arr[1], std::uint16_t(0));
+            CHECK_NULLABLE_VARIANT_EQ(arr[2], float32_t(1.0f));
+
+            const auto child0 = test::get_float_child(arr);
+            const auto child1 = test::get_uint16_child(arr);
+            REQUIRE_EQ(child0.size(), 2u);
+            REQUIRE_EQ(child1.size(), 1u);
+        }
+
+        TEST_CASE("resize grows dense union with fill value")
+        {
+            auto proxy = test::make_dense_union_proxy("+ud:3,4", 2);
+            dense_union_array arr(std::move(proxy));
+
+            arr.resize(6, test::make_uint16_typed_value<dense_union_array>(std::uint16_t(11)));
+
+            REQUIRE_EQ(arr.size(), 6u);
+            CHECK_NULLABLE_VARIANT_EQ(arr[0], float32_t(0.0f));
+            CHECK_NULLABLE_VARIANT_EQ(arr[1], std::uint16_t(0));
+            CHECK_NULLABLE_VARIANT_EQ(arr[2], float32_t(1.0f));
+            CHECK_NULLABLE_VARIANT_EQ(arr[3], std::uint16_t(1));
+            CHECK_NULLABLE_VARIANT_EQ(arr[4], std::uint16_t(11));
+            CHECK_NULLABLE_VARIANT_EQ(arr[5], std::uint16_t(11));
+
+            const auto child0 = test::get_float_child(arr);
+            const auto child1 = test::get_uint16_child(arr);
+            REQUIRE_EQ(child0.size(), 2u);
+            REQUIRE_EQ(child1.size(), 4u);
+            CHECK_EQ(child1[2].value(), std::uint16_t(11));
+            CHECK_EQ(child1[3].value(), std::uint16_t(11));
+        }
+
+        TEST_CASE("clear removes all dense union values")
+        {
+            auto proxy = test::make_dense_union_proxy("+ud:3,4", 2);
+            dense_union_array arr(std::move(proxy));
+
+            arr.clear();
+            CHECK(arr.empty());
+
+            const auto child0 = test::get_float_child(arr);
+            const auto child1 = test::get_uint16_child(arr);
+            CHECK(child0.empty());
+            CHECK(child1.empty());
+        }
+
+        TEST_CASE("insert on non canonical offsets is unsupported")
+        {
+            dense_union_array arr(test::make_noncanonical_dense_union_proxy());
+
+            CHECK_THROWS_AS(
+                arr.insert(arr.cbegin(), test::make_uint16_typed_value<dense_union_array>(std::uint16_t(9))),
+                std::logic_error
+            );
+        }
+
+        TEST_CASE("erase on non canonical offsets is unsupported")
+        {
+            dense_union_array arr(test::make_noncanonical_dense_union_proxy());
+
+            CHECK_THROWS_AS(arr.erase(arr.cbegin()), std::logic_error);
+        }
+
+        TEST_CASE("insert on slice is unsupported")
+        {
+            dense_union_array original(test::make_dense_union_proxy("+ud:3,4", 2));
+            dense_union_array sliced(detail::array_access::get_arrow_proxy(original).slice(1, 2));
+
+            CHECK_THROWS_AS(
+                sliced.insert(sliced.cbegin(), test::make_float32_typed_value<dense_union_array>(7.0f)),
+                std::logic_error
+            );
+        }
+
+        TEST_CASE("erase on slice is unsupported")
+        {
+            dense_union_array original(test::make_dense_union_proxy("+ud:3,4", 2));
+            dense_union_array sliced(detail::array_access::get_arrow_proxy(original).slice(1, 2));
+
+            CHECK_THROWS_AS(sliced.erase(sliced.cbegin()), std::logic_error);
+        }
     }
 }
