@@ -1,11 +1,11 @@
 # sparrow
 
-[![GHA Linux](https://github.com/man-group/sparrow/actions/workflows/linux.yml/badge.svg)](https://github.com/man-group/sparrow/actions/workflows/linux.yml)
-[![GHA OSX](https://github.com/man-group/sparrow/actions/workflows/osx.yml/badge.svg)](https://github.com/man-group/sparrow/actions/workflows/osx.yml)
-[![GHA Windows](https://github.com/man-group/sparrow/actions/workflows/windows.yml/badge.svg)](https://github.com/man-group/sparrow/actions/workflows/windows.yml)
-[![GHA Docs](https://github.com/man-group/sparrow/actions/workflows/deploy-pages.yaml/badge.svg)](https://github.com/man-group/sparrow/actions/workflows/deploy-pages.yaml)
-[![Codecov](https://codecov.io/gh/man-group/sparrow/graph/badge.svg)](https://app.codecov.io/gh/man-group/sparrow)
-[![Integration tests](https://github.com/man-group/sparrow/actions/workflows/integration_tests.yaml/badge.svg?branch=main)](https://github.com/man-group/sparrow/actions/workflows/integration_tests.yaml)
+[![GHA Linux](https://github.com/sparrow-org/sparrow/actions/workflows/linux.yml/badge.svg)](https://github.com/sparrow-org/sparrow/actions/workflows/linux.yml)
+[![GHA OSX](https://github.com/sparrow-org/sparrow/actions/workflows/osx.yml/badge.svg)](https://github.com/sparrow-org/sparrow/actions/workflows/osx.yml)
+[![GHA Windows](https://github.com/sparrow-org/sparrow/actions/workflows/windows.yml/badge.svg)](https://github.com/sparrow-org/sparrow/actions/workflows/windows.yml)
+[![GHA Docs](https://github.com/sparrow-org/sparrow/actions/workflows/deploy-pages.yaml/badge.svg)](https://github.com/sparrow-org/sparrow/actions/workflows/deploy-pages.yaml)
+[![Codecov](https://codecov.io/gh/sparrow-org/sparrow/graph/badge.svg)](https://app.codecov.io/gh/sparrow-org/sparrow)
+[![Integration tests](https://github.com/sparrow-org/sparrow/actions/workflows/integration_tests.yaml/badge.svg?branch=main)](https://github.com/sparrow-org/sparrow/actions/workflows/integration_tests.yaml)
 
 C++20 idiomatic APIs for the Apache Arrow Columnar Format
 
@@ -14,7 +14,7 @@ C++20 idiomatic APIs for the Apache Arrow Columnar Format
 `sparrow` is an implementation of the Apache Arrow Columnar format in C++. It provides array structures
 with idiomatic APIs and convenient conversions from and to the [C interface](https://arrow.apache.org/docs/dev/format/CDataInterface.html#structure-definitions).
 
-Try it online without any installation ! [![Try Sparrow in JupyterLite](https://jupyterlite.rtfd.io/en/latest/_static/badge.svg)](https://man-group.github.io/sparrow/jupyterlite)
+Try it online without any installation ! [![Try Sparrow in JupyterLite](https://jupyterlite.rtfd.io/en/latest/_static/badge.svg)](https://sparrow-org.github.io/sparrow/jupyterlite)
 
 `sparrow` requires a modern C++ compiler supporting C++20.
 
@@ -133,7 +133,7 @@ sp::array ar(std::move(array), std::move(schema));
 
 ## Documentation
 
-The documentation (currently being written) can be found at https://man-group.github.io/sparrow/index.html
+The documentation (currently being written) can be found at https://sparrow-org.github.io/sparrow/index.html
 
 ## Acknowledgements
 
