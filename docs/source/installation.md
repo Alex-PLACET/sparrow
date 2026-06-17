@@ -42,5 +42,5 @@ dnf install sparrow
 From source with cmake
 ----------------------
 
-After cloning the [repo](https://github.com/man-group/sparrow), you can build and install
+After cloning the [repo](https://github.com/sparrow-org/sparrow), you can build and install
 sparrow as described in the \ref dev_build section.

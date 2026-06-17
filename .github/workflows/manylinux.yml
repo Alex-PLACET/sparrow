@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   pull_request:
   push:
-    branches: [main]
+    branches: [ main ]
 concurrency:
   group: ${{ github.workflow }}-${{ github.job }}-${{ github.ref }}
   cancel-in-progress: true
@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        config: [Debug, Release]
+        config: [ Debug, Release ]
     name: manylinux2014 / GCC / 11.2 / ${{ matrix.config }}
 
     steps:
@@ -33,9 +33,9 @@ jobs:
         git checkout ${{ github.head_ref }}
 
     - name: Checkout sparrow
-      if: (github.event_name == 'push' && github.repository == 'man-group/sparrow' && github.ref_name == 'main') || github.event.workflow_dispatch
+      if: (github.event_name == 'push' && github.repository == 'sparrow-org/sparrow' && github.ref_name == 'main') || github.event.workflow_dispatch
       run: |
-        git clone https://github.com/man-group/sparrow.git
+        git clone https://github.com/sparrow-org/sparrow.git
 
     - name: Setup conda environment
       run: |
