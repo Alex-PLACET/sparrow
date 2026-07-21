@@ -16,7 +16,7 @@
 
 #include "sparrow/layout/layout_utils.hpp"
 #include "sparrow/utils/functor_index_iterator.hpp"
-#if defined(__cpp_lib_format)
+#if __has_include(<format>)
 #    include <format>
 #endif
 

@@ -27,7 +27,7 @@
 #include "sparrow/utils/contracts.hpp"
 #include "sparrow/utils/ranges.hpp"
 
-#if defined(__cpp_lib_format)
+#if __has_include(<format>)
 #    include <format>
 #    include <ostream>
 #endif

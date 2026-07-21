@@ -124,9 +124,11 @@ namespace sparrow
 #endif
 }  // namespace sparrow
 
-#if defined(__cpp_lib_format)
-
+#if __has_include(<format>)
 #    include <format>
+#endif
+
+#if defined(__cpp_lib_format)
 
 // Full specialization fails on OSX 15.4 because the
 // template is already instantiated in std::format

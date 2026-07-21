@@ -22,7 +22,7 @@
 #include <ranges>
 #include <unordered_set>
 
-#if defined(__cpp_lib_format)
+#if __has_include(<format>)
 #    include <format>
 #    include <ostream>
 #endif

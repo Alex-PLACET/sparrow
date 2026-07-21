@@ -305,7 +305,7 @@ namespace sparrow
     }
 }
 
-#if defined(__cpp_lib_format)
+#if __has_include(<format>)
 #    include <format>
 
 template <class B>
