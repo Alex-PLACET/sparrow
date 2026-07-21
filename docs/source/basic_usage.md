@@ -220,6 +220,33 @@ sp::buffer<int> buf(ptr, 100, alloc);
 
 **Important:** The allocator passed to the buffer constructor must be compatible with the allocation method used for the pointer. The allocator's `deallocate()` method will be called to free the memory, so you must ensure it matches how the memory was allocated. Using an incompatible allocator will result in undefined behavior during deallocation.
 
+### Uninitialized output buffers
+
+When a computation overwrites every output element, construct a `u8_buffer` with
+its `uninitialized_t` tag to avoid first value-initializing the storage. This is
+intended for producers such as numerical kernels that fill the entire result.
+
+```cpp
+#include <numeric>
+#include "sparrow.hpp"
+namespace sp = sparrow;
+
+constexpr std::size_t size = 1'000;
+sp::u8_buffer<double> output(size, sp::u8_buffer<double>::uninitialized_t{});
+
+// A producer must write every element before any element is read.
+std::iota(output.begin(), output.end(), 0.0);
+sp::primitive_array<double> result(std::move(output), size, false);
+```
+
+This overload is available only for trivially default-constructible and trivially
+destructible element types. An uninitialized buffer has a size, but its elements
+do not have values until written. Reading, copying, comparing, iterating for
+values, or otherwise observing an unwritten element is undefined behavior.
+Do not pass it to an array or another consumer until the complete used range has
+been initialized. Use the normal `u8_buffer(size)` constructor if the complete
+overwrite guarantee does not hold.
+
 Floating-Point Type Traits
 --------------------------
 
@@ -308,4 +335,3 @@ Making the Sparrow traits available unconditionally might seem convenient (it wo
 - When writing template code involving `sparrow::float16_t`, `sparrow::float32_t`, or `sparrow::float64_t`, use `sparrow::is_floating_point_v`, `sparrow::is_scalar_v`, and `sparrow::is_signed_v` instead of their `std::` counterparts.
 - Sparrow cannot enforce that you use these traits at compile time, so discipline on the client side is required.
 - Once your toolchain fully supports C++23 fixed-width floating-point types (i.e. `SPARROW_STD_FIXED_FLOAT_SUPPORT` is defined), you can migrate back to the standard `std::` traits.
-

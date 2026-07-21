@@ -152,11 +152,30 @@ namespace sparrow
         ~u8_buffer() = default;
 
         /**
-         * Constructs a buffer with \c n uninitialized elements.
+         * Constructs a buffer with \c n value-initialized elements.
          *
          * @param n Number of elements.
          */
         constexpr explicit u8_buffer(std::size_t n);
+
+        /**
+         * Constructs a buffer with \c n uninitialized elements.
+         *
+         * This overload is available only for trivially default-constructible
+         * and trivially destructible types. Every element must be written
+         * before it is read; reading an unwritten element is undefined behavior.
+         * Use this only when an operation overwrites the complete buffer.
+         */
+        struct uninitialized_t
+        {
+            explicit constexpr uninitialized_t() = default;
+        };
+
+        constexpr u8_buffer(std::size_t n, uninitialized_t)
+            requires(
+                std::is_trivially_default_constructible_v<T>
+                && std::is_trivially_destructible_v<T>
+            );
 
         /**
          * Constructs a buffer with \c n elements, each initialized to \c val.
@@ -235,6 +254,21 @@ namespace sparrow
     template <class T>
     constexpr u8_buffer<T>::u8_buffer(std::size_t n)
         : holder_type{n * sizeof(T), typename buffer_type::default_allocator{}}
+        , buffer_adaptor_type(holder_type::value)
+    {
+    }
+
+    template <class T>
+    constexpr u8_buffer<T>::u8_buffer(std::size_t n, uninitialized_t)
+        requires(
+            std::is_trivially_default_constructible_v<T>
+            && std::is_trivially_destructible_v<T>
+        )
+        : holder_type{
+              n * sizeof(T),
+              typename buffer_type::uninitialized_t{},
+              typename buffer_type::default_allocator{}
+          }
         , buffer_adaptor_type(holder_type::value)
     {
     }

@@ -14,10 +14,22 @@
 
 #include <doctest/doctest.h>
 
+#include <cstdint>
+#include <numeric>
+#include <string>
+
 #include "sparrow/array.hpp"
 #include "sparrow/arrow_interface/arrow_array.hpp"
 #include "sparrow/primitive_array.hpp"
 #include "sparrow/u8_buffer.hpp"
+
+template <class T>
+concept supports_uninitialized_u8_buffer = requires {
+    sparrow::u8_buffer<T>(8, typename sparrow::u8_buffer<T>::uninitialized_t{});
+};
+
+static_assert(supports_uninitialized_u8_buffer<std::int32_t>);
+static_assert(not supports_uninitialized_u8_buffer<std::string>);
 
 TEST_SUITE("u8_buffer")
 {
@@ -31,6 +43,38 @@ TEST_SUITE("u8_buffer")
             CHECK_EQ(b.size(), size);
             CHECK_NE(b.data(), nullptr);
             CHECK_EQ(b.data()[2], 0);
+        }
+
+        SUBCASE("with uninitialized size")
+        {
+            constexpr std::size_t size = 8u;
+            sparrow::u8_buffer<int32_t> b(size, typename sparrow::u8_buffer<int32_t>::uninitialized_t{});
+
+            CHECK_EQ(b.size(), size);
+            CHECK_NE(b.data(), nullptr);
+            std::fill(b.begin(), b.end(), 42);
+            CHECK_EQ(b[2], 42);
+        }
+
+        SUBCASE("uninitialized typed storage can be transferred after writing")
+        {
+            constexpr std::size_t size = 8u;
+            sparrow::u8_buffer<std::int64_t> data(size, sparrow::u8_buffer<std::int64_t>::uninitialized_t{});
+            std::iota(data.begin(), data.end(), std::int64_t{10});
+
+            sparrow::primitive_array<std::int64_t> array(std::move(data), size, false);
+            CHECK_EQ(array.size(), size);
+            for (std::size_t i = 0; i < size; ++i)
+            {
+                CHECK_EQ(array[i], static_cast<std::int64_t>(10 + i));
+            }
+        }
+
+        SUBCASE("with zero uninitialized elements")
+        {
+            sparrow::u8_buffer<double> b(0, sparrow::u8_buffer<double>::uninitialized_t{});
+            CHECK_EQ(b.size(), 0u);
+            CHECK_EQ(b.data(), nullptr);
         }
 
         SUBCASE("with size and value")

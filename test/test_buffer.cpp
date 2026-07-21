@@ -32,6 +32,14 @@ namespace sparrow
 
     using allocator_type = buffer_test_type::default_allocator;
 
+    template <class T>
+    concept supports_uninitialized_buffer = requires(typename buffer<T>::default_allocator a) {
+        buffer<T>(8, typename buffer<T>::uninitialized_t{}, a);
+    };
+
+    static_assert(supports_uninitialized_buffer<int32_t>);
+    static_assert(not supports_uninitialized_buffer<std::string>);
+
     namespace
     {
         auto make_test_buffer(std::size_t size, int32_t start_value = 0) -> int32_t*
@@ -82,6 +90,20 @@ namespace sparrow
                 for (std::size_t i = 0; i < expected_size; ++i)
                 {
                     CHECK_EQ(b[i], 0);
+                }
+            }
+
+            SUBCASE("with uninitialized size")
+            {
+                buffer_test_type b(expected_size, buffer_test_type::uninitialized_t{}, alloc);
+                CHECK_NE(b.data(), nullptr);
+                CHECK_EQ(b.size(), expected_size);
+                CHECK_EQ(b.capacity(), expected_size);
+
+                std::iota(b.begin(), b.end(), 0);
+                for (std::size_t i = 0; i < expected_size; ++i)
+                {
+                    CHECK_EQ(b[i], static_cast<int32_t>(i));
                 }
             }
 
