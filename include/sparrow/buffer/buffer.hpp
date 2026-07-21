@@ -380,7 +380,10 @@ namespace sparrow
     constexpr buffer_base<T>::buffer_base(size_type n, const A& a)
         : m_alloc(a)
     {
-        create_storage(n);
+        if (n > 0)
+        {
+            create_storage(n);
+        }
     }
 
     template <class T>

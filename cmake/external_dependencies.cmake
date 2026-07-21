@@ -85,7 +85,7 @@ if(BUILD_TESTS)
     endif()
     if(FETCH_DEPENDENCIES_WITH_CMAKE STREQUAL "ON" OR FETCH_DEPENDENCIES_WITH_CMAKE STREQUAL "MISSING") 
         if(NOT doctest_FOUND)
-            set(DOCTEST_VERSION "v2.4.12")
+            set(DOCTEST_VERSION "v2.5.3")
             message(STATUS "📦 Fetching doctest ${DOCTEST_VERSION}")
             FetchContent_Declare(
                 doctest
@@ -132,7 +132,7 @@ if(BUILD_BENCHMARKS)
     endif()
     if(FETCH_DEPENDENCIES_WITH_CMAKE STREQUAL "ON" OR FETCH_DEPENDENCIES_WITH_CMAKE STREQUAL "MISSING")
         if(NOT benchmark_FOUND)
-            set(BENCHMARK_VERSION "v1.9.4")
+            set(BENCHMARK_VERSION "v1.9.5")
             message(STATUS "📦 Fetching GoogleBenchmark ${BENCHMARK_VERSION}")
             set(BENCHMARK_ENABLE_TESTING OFF)
             set(BENCHMARK_ENABLE_INSTALL OFF)
@@ -142,7 +142,7 @@ if(BUILD_BENCHMARKS)
                 benchmark
                 GIT_SHALLOW TRUE
                 GIT_REPOSITORY https://github.com/google/benchmark.git
-                GIT_TAG v1.9.4
+                GIT_TAG ${BENCHMARK_VERSION}
                 GIT_PROGRESS TRUE
                 SYSTEM
                 EXCLUDE_FROM_ALL)
