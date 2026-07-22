@@ -187,7 +187,7 @@ jobs:
       run: cmake --build . --config ${{matrix.config.name}} --target run_c_data_integration_with_junit_report
 
     - name: Upload test results
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       if: success() || failure()
       with:
         name: test_sparrow_lib_report_Windows_${{ matrix.toolchain.compiler }}_${{ matrix.build-system.name }}_${{ matrix.config.name }}_${{ matrix.target-arch.name }}_date-polyfill_${{ matrix.toolchain.date-polyfill}}_shared_${{ matrix.toolchain.shared }}

@@ -37,7 +37,7 @@ jobs:
         run: cmake --build build --target docs
 
       - name: Upload docs artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: doxygen-docs
           path: build/docs/html

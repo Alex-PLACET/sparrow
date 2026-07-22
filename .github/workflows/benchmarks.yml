@@ -109,7 +109,7 @@ jobs:
       run: cmake --build . --config ${{matrix.config}} --target run_benchmarks_json
 
     - name: Upload benchmark results
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: benchmark-results
         path: ./**/sparrow_benchmarks.json
