@@ -198,6 +198,14 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE "${BINARY_BUILD_DIR}")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_DEBUG "${BINARY_BUILD_DIR}")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE "${BINARY_BUILD_DIR}")
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_DEBUG "${BINARY_BUILD_DIR}")
+
+if(WIN32 AND TARGET date-tz)
+    # date-tz is a runtime dependency of sparrow when the date polyfill is
+    # enabled. Keep it beside the executables so Windows can resolve it.
+    set_target_properties(date-tz PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${BINARY_BUILD_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${BINARY_BUILD_DIR}")
+endif()
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_RELEASE "${BINARY_BUILD_DIR}")
 
 set(SPARROW_HEADERS
