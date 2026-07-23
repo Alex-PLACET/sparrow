@@ -89,6 +89,8 @@ class SparrowRecipe(ConanFile):
     def configure(self):
         if self.options.shared:
             self.options.rm_safe("fPIC")
+        if self.options.get_safe("use_date_polyfill") and self.settings.os != "Windows":
+            self.options["date/*"].tz_db = "system"
 
     def layout(self):
         cmake_layout(self, src_folder=".")
