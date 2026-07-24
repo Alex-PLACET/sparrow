@@ -4,7 +4,7 @@
 #include <iostream>
 #include <sstream>
 
-#if defined(__cpp_lib_format)
+#if __has_include(<format>)
 #    include <format>
 #endif
 

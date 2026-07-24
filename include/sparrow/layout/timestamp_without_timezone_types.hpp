@@ -71,10 +71,11 @@ namespace sparrow
     };
 }
 
+#if __has_include(<format>)
+#    include <format>
+#endif
 
 #if defined(__cpp_lib_format)
-
-#    include <format>
 
 template <typename T>
     requires std::same_as<T, sparrow::zoned_time_without_timezone_seconds>

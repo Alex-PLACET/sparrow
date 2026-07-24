@@ -22,7 +22,7 @@
 #include "sparrow/utils/iterator.hpp"
 #include "sparrow/utils/mp_utils.hpp"
 
-#if defined(__cpp_lib_format)
+#if __has_include(<format>)
 #    include <format>
 #    include <ostream>
 #endif

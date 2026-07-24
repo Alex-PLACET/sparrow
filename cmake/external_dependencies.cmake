@@ -16,7 +16,7 @@ if(${USE_DATE_POLYFILL})
 
     if(FETCH_DEPENDENCIES_WITH_CMAKE STREQUAL "ON" OR FETCH_DEPENDENCIES_WITH_CMAKE STREQUAL "MISSING") 
         if(NOT date_FOUND)
-            set(DATE_VERSION "v3.0.3")
+            set(DATE_VERSION "v3.0.4")
             message(STATUS "📦 Fetching HowardHinnant date ${DATE_VERSION}")
             if(NOT DEFINED USE_SYSTEM_TZ_DB)
                 set(USE_SYSTEM_TZ_DB ON)
@@ -32,6 +32,43 @@ if(${USE_DATE_POLYFILL})
                 SYSTEM
                 EXCLUDE_FROM_ALL)
             FetchContent_MakeAvailable(date)
+
+            # On Windows there is no system IANA timezone database.  The date
+            # library otherwise falls back to %USERPROFILE%/Downloads/tzdata,
+            # which makes test and example executables depend on machine state.
+            # Keep the database in the build tree and compile the timezone
+            # library with that fixed location instead.
+            if(WIN32 AND TARGET date-tz)
+                set(SPARROW_TZDATA_DIR "${CMAKE_BINARY_DIR}/tzdata")
+                set(SPARROW_TZDATA_ARCHIVE "${CMAKE_BINARY_DIR}/tzdata2025b.tar.gz")
+                if(NOT EXISTS "${SPARROW_TZDATA_DIR}/northamerica")
+                    file(DOWNLOAD
+                        "https://data.iana.org/time-zones/releases/tzdata2025b.tar.gz"
+                        "${SPARROW_TZDATA_ARCHIVE}"
+                        SHOW_PROGRESS
+                        STATUS SPARROW_TZDATA_DOWNLOAD_STATUS)
+                    list(GET SPARROW_TZDATA_DOWNLOAD_STATUS 0 SPARROW_TZDATA_DOWNLOAD_CODE)
+                    if(NOT SPARROW_TZDATA_DOWNLOAD_CODE EQUAL 0)
+                        message(FATAL_ERROR "Failed to download IANA timezone data: ${SPARROW_TZDATA_DOWNLOAD_STATUS}")
+                    endif()
+                    file(ARCHIVE_EXTRACT
+                        INPUT "${SPARROW_TZDATA_ARCHIVE}"
+                        DESTINATION "${SPARROW_TZDATA_DIR}")
+                endif()
+                if(NOT EXISTS "${SPARROW_TZDATA_DIR}/windowsZones.xml")
+                    file(DOWNLOAD
+                        "https://raw.githubusercontent.com/unicode-org/cldr/main/common/supplemental/windowsZones.xml"
+                        "${SPARROW_TZDATA_DIR}/windowsZones.xml"
+                        SHOW_PROGRESS
+                        STATUS SPARROW_WINDOWS_TZDATA_DOWNLOAD_STATUS)
+                    list(GET SPARROW_WINDOWS_TZDATA_DOWNLOAD_STATUS 0 SPARROW_WINDOWS_TZDATA_DOWNLOAD_CODE)
+                    if(NOT SPARROW_WINDOWS_TZDATA_DOWNLOAD_CODE EQUAL 0)
+                        message(FATAL_ERROR "Failed to download Windows timezone mappings: ${SPARROW_WINDOWS_TZDATA_DOWNLOAD_STATUS}")
+                    endif()
+                endif()
+                target_compile_definitions(date-tz PRIVATE
+                    "INSTALL=${CMAKE_BINARY_DIR}")
+            endif()
             unset(USE_SYSTEM_TZ_DB CACHE)
             unset(BUILD_TZ_LIB CACHE)
             unset(BUILD_SHARED_LIBS CACHE)

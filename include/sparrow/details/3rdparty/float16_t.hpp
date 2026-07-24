@@ -88,7 +88,7 @@
 #include <cfenv>
 #include <functional>
 
-#if defined(__cpp_lib_format)
+#if __has_include(<format>)
 #    include <format>
 #    include <sstream>
 #endif
@@ -4059,4 +4059,3 @@ namespace half_float {
 #elif defined(_MSC_VER)
 #    pragma warning(pop)
 #endif
-

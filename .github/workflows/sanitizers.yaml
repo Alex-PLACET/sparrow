@@ -114,7 +114,7 @@ jobs:
       
     - name: Upload ASAN log
       if: always()
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: asan-log-${{ matrix.sys.compiler }}-${{ matrix.sys.version }}-${{ matrix.config.name }}-${{ matrix.sys.date-polyfill }}-${{ runner.os }}
         path: '**/asan_log_*'
@@ -122,7 +122,7 @@ jobs:
 
     - name: Upload ASAN dump
       if: always()
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: asan-dump-${{ matrix.sys.compiler }}-${{ matrix.sys.version }}-${{ matrix.config.name }}-${{ matrix.sys.date-polyfill }}-${{ runner.os }}
         path: '**/AsanDump.dmp'
