@@ -184,8 +184,8 @@ namespace sparrow
          */
         template <allocator A>
             requires(
-                std::is_trivially_default_constructible_v<value_type>
-                && std::is_trivially_destructible_v<value_type>
+                std::is_trivially_default_constructible_v<T>
+                && std::is_trivially_destructible_v<T>
             )
         constexpr buffer(size_type n, uninitialized_t, const A& a);
 
@@ -477,8 +477,8 @@ namespace sparrow
     template <class T>
     template <allocator A>
         requires(
-            std::is_trivially_default_constructible_v<typename buffer<T>::value_type>
-            && std::is_trivially_destructible_v<typename buffer<T>::value_type>
+            std::is_trivially_default_constructible_v<T>
+            && std::is_trivially_destructible_v<T>
         )
     constexpr buffer<T>::buffer(size_type n, uninitialized_t, const A& a)
         : base_type(check_init_length(n, a), a)
