@@ -34,7 +34,7 @@ namespace sparrow
 
     template <class T>
     concept supports_uninitialized_buffer = requires(typename buffer<T>::default_allocator a) {
-        buffer<T>(8, typename buffer<T>::uninitialized_t{}, a);
+        buffer<T>(8, uninitialized_t{}, a);
     };
 
     static_assert(supports_uninitialized_buffer<int32_t>);
@@ -95,7 +95,7 @@ namespace sparrow
 
             SUBCASE("with uninitialized size")
             {
-                buffer_test_type b(expected_size, buffer_test_type::uninitialized_t{}, alloc);
+                buffer_test_type b(expected_size, uninitialized_t{}, alloc);
                 CHECK_NE(b.data(), nullptr);
                 CHECK_EQ(b.size(), expected_size);
                 CHECK_EQ(b.capacity(), expected_size);

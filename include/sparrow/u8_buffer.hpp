@@ -166,11 +166,6 @@ namespace sparrow
          * before it is read; reading an unwritten element is undefined behavior.
          * Use this only when an operation overwrites the complete buffer.
          */
-        struct uninitialized_t
-        {
-            explicit constexpr uninitialized_t() = default;
-        };
-
         constexpr u8_buffer(std::size_t n, uninitialized_t)
             requires(
                 std::is_trivially_default_constructible_v<T>
@@ -266,7 +261,7 @@ namespace sparrow
         )
         : holder_type{
               n * sizeof(T),
-              typename buffer_type::uninitialized_t{},
+              uninitialized_t{},
               typename buffer_type::default_allocator{}
           }
         , buffer_adaptor_type(holder_type::value)

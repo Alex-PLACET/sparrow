@@ -56,6 +56,17 @@ namespace sparrow
     concept is_buffer_view = requires(T t) { typename T::is_buffer_view; };
 
     /**
+     * Tag selecting allocation without value-initializing the elements.
+     *
+     * This is only valid for trivially destructible, implicit-lifetime
+     * element types. Every element must be written before it is read.
+     */
+    struct uninitialized_t
+    {
+        explicit constexpr uninitialized_t() = default;
+    };
+
+    /**
      * Base class for buffer.
      *
      * This class provides memory management for the buffer class.
@@ -139,17 +150,6 @@ namespace sparrow
         );
 
     public:
-        /**
-         * Tag selecting allocation without value-initializing the elements.
-         *
-         * This is only valid for trivially destructible, implicit-lifetime
-         * element types. Every element must be written before it is read.
-         */
-        struct uninitialized_t
-        {
-            explicit constexpr uninitialized_t() = default;
-        };
-
 
         using allocator_type = typename base_type::allocator_type;
         using default_allocator = xsimd::aligned_allocator<T>;
