@@ -38,8 +38,11 @@ namespace sparrow
         void write(const JUnitTestSuites& test_suites);
 
     private:
-
+#if DOCTEST_VERSION_MAJOR >= 2 && DOCTEST_VERSION_MINOR >= 4
         doctest::detail::XmlWriter m_xml_writer;
+#else
+        doctest::XmlWriter m_xml_writer;
+#endif
         // TODO: check if a copy is acceptable
         const doctest::ContextOptions& m_context_options;
     };
