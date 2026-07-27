@@ -17,7 +17,7 @@ jobs:
       matrix:
         compiler: [clang, gcc]
         version: [11, 12, 13, 14, 17, 18, 19, 20, 21]
-        os: [namespace-profile-ubuntu24-4-8, namespace-profile-ubuntu24-4-8-arm]
+        os: [namespace-profile-sparrow-compilation-linux, namespace-profile-sparrow-compilation-linux-arm]
         arch: [64]
         config: [Debug, RelWithDebInfo]
         date-polyfill: [ON, OFF]
@@ -51,7 +51,7 @@ jobs:
         include:
           - compiler: gcc
             version: 13
-            os: namespace-profile-ubuntu24-4-8
+            os: namespace-profile-sparrow-compilation-linux
             arch: 32
             config: Release
             date-polyfill: OFF
@@ -59,7 +59,7 @@ jobs:
             cpp_standard: 20
           - compiler: gcc
             version: 14
-            os: namespace-profile-ubuntu24-4-8
+            os: namespace-profile-sparrow-compilation-linux
             arch: 64
             config: Release
             date-polyfill: OFF
@@ -67,7 +67,7 @@ jobs:
             cpp_standard: 23
           - compiler: clang
             version: 20
-            os: namespace-profile-ubuntu24-4-8
+            os: namespace-profile-sparrow-compilation-linux
             arch: 64
             config: Release
             date-polyfill: OFF
@@ -77,7 +77,7 @@ jobs:
           # restriction introduced in libc++ 19+ (_LIBCPP_NO_SPECIALIZATIONS)
           - compiler: clang
             version: 21
-            os: namespace-profile-ubuntu24-4-8
+            os: namespace-profile-sparrow-compilation-linux
             arch: 64
             config: Debug
             date-polyfill: ON
@@ -86,7 +86,7 @@ jobs:
             stdlib: libc++
           - compiler: clang
             version: 21
-            os: namespace-profile-ubuntu24-4-8
+            os: namespace-profile-sparrow-compilation-linux
             arch: 64
             config: Release
             date-polyfill: OFF
