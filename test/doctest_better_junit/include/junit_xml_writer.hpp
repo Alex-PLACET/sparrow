@@ -38,7 +38,7 @@ namespace sparrow
         void write(const JUnitTestSuites& test_suites);
 
     private:
-#if DOCTEST_VERSION_MAJOR >= 2 && DOCTEST_VERSION_MINOR >= 4
+#if DOCTEST_VERSION_MAJOR >= 2 && DOCTEST_VERSION_MINOR >= 5
         doctest::detail::XmlWriter m_xml_writer;
 #else
         doctest::XmlWriter m_xml_writer;
