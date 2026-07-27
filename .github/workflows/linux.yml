@@ -116,10 +116,10 @@ jobs:
 
     - name: Install GCC
       if: matrix.compiler == 'gcc'
-      uses: egor-tensin/setup-gcc@v1
+      id: install_cc
+      uses: rlalik/setup-cpp-compiler@v2
       with:
-        version: ${{matrix.version}}
-        platform: x64
+        compiler: gcc-${{matrix.version}}
 
     - name: Install LLVM and Clang
       if: matrix.compiler == 'clang'
