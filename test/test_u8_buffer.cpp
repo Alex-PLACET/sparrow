@@ -25,7 +25,7 @@
 
 template <class T>
 concept supports_uninitialized_u8_buffer = requires {
-    sparrow::u8_buffer<T>(8, uninitialized_t{});
+    sparrow::u8_buffer<T>(8, sparrow::uninitialized_t{});
 };
 
 static_assert(supports_uninitialized_u8_buffer<std::int32_t>);
@@ -48,7 +48,7 @@ TEST_SUITE("u8_buffer")
         SUBCASE("with uninitialized size")
         {
             constexpr std::size_t size = 8u;
-            sparrow::u8_buffer<int32_t> b(size, uninitialized_t{});
+            sparrow::u8_buffer<int32_t> b(size, sparrow::uninitialized_t{});
 
             CHECK_EQ(b.size(), size);
             CHECK_NE(b.data(), nullptr);
@@ -59,7 +59,7 @@ TEST_SUITE("u8_buffer")
         SUBCASE("uninitialized typed storage can be transferred after writing")
         {
             constexpr std::size_t size = 8u;
-            sparrow::u8_buffer<std::int64_t> data(size, uninitialized_t{});
+            sparrow::u8_buffer<std::int64_t> data(size, sparrow::uninitialized_t{});
             std::iota(data.begin(), data.end(), std::int64_t{10});
 
             sparrow::primitive_array<std::int64_t> array(std::move(data), size, false);
@@ -72,7 +72,7 @@ TEST_SUITE("u8_buffer")
 
         SUBCASE("with zero uninitialized elements")
         {
-            sparrow::u8_buffer<double> b(0, uninitialized_t{});
+            sparrow::u8_buffer<double> b(0, sparrow::uninitialized_t{});
             CHECK_EQ(b.size(), 0u);
             CHECK_EQ(b.data(), nullptr);
         }
