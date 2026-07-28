@@ -60,14 +60,14 @@ namespace sparrow
             return *this;
         }
 
-        Custom(Custom&& rhs)
+        Custom(Custom&& rhs) noexcept
             : m_value(rhs.m_value)
+            , m_moved(true)
         {
-            m_moved = true;
             ++counter;
         }
 
-        Custom& operator=(Custom&& rhs)
+        Custom& operator=(Custom&& rhs) noexcept
         {
             m_value = rhs.m_value;
             if (!m_moved)

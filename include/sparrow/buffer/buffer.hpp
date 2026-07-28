@@ -56,6 +56,17 @@ namespace sparrow
     concept is_buffer_view = requires(T t) { typename T::is_buffer_view; };
 
     /**
+     * Tag selecting allocation without value-initializing the elements.
+     *
+     * This is only valid for trivially destructible, implicit-lifetime
+     * element types. Every element must be written before it is read.
+     */
+    struct uninitialized_t
+    {
+        explicit constexpr uninitialized_t() = default;
+    };
+
+    /**
      * Base class for buffer.
      *
      * This class provides memory management for the buffer class.
@@ -165,6 +176,18 @@ namespace sparrow
 
         template <allocator A>
         constexpr explicit buffer(size_type n, const A& a);
+
+        /**
+         * Constructs a buffer whose elements are not initialized.
+         *
+         * @pre Every element is written before being read.
+         */
+        template <allocator A>
+            requires(
+                std::is_trivially_default_constructible_v<T>
+                && std::is_trivially_destructible_v<T>
+            )
+        constexpr buffer(size_type n, uninitialized_t, const A& a);
 
         template <allocator A>
         constexpr buffer(size_type n, const value_type& v, const A& a);
@@ -357,7 +380,10 @@ namespace sparrow
     constexpr buffer_base<T>::buffer_base(size_type n, const A& a)
         : m_alloc(a)
     {
-        create_storage(n);
+        if (n > 0)
+        {
+            create_storage(n);
+        }
     }
 
     template <class T>
@@ -446,6 +472,17 @@ namespace sparrow
         : base_type(check_init_length(n, a), a)
     {
         get_data().p_end = default_initialize(get_data().p_begin, n, get_allocator());
+    }
+
+    template <class T>
+    template <allocator A>
+        requires(
+            std::is_trivially_default_constructible_v<T>
+            && std::is_trivially_destructible_v<T>
+        )
+    constexpr buffer<T>::buffer(size_type n, uninitialized_t, const A& a)
+        : base_type(check_init_length(n, a), a)
+    {
     }
 
     template <class T>
