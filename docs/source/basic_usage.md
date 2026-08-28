@@ -232,7 +232,7 @@ intended for producers such as numerical kernels that fill the entire result.
 namespace sp = sparrow;
 
 constexpr std::size_t size = 1'000;
-sp::u8_buffer<double> output(size, sp::u8_buffer<double>::uninitialized_t{});
+sp::u8_buffer<double> output(size, sp::uninitialized_t{});
 
 // A producer must write every element before any element is read.
 std::iota(output.begin(), output.end(), 0.0);
