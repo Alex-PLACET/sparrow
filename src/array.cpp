@@ -16,6 +16,7 @@
 
 #include <stdexcept>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "sparrow/arrow_interface/arrow_array.hpp"
@@ -27,6 +28,31 @@
 
 namespace sparrow
 {
+    namespace
+    {
+        template <class Array, class Iterator>
+        void insert_repeated(
+            Array& destination,
+            std::size_t index,
+            Iterator first,
+            Iterator last,
+            std::size_t count
+        )
+        {
+            const auto inserted_size = static_cast<std::ptrdiff_t>(std::distance(first, last));
+            auto current_index = static_cast<std::ptrdiff_t>(index);
+            for (std::size_t copy = 0; copy < count; ++copy)
+            {
+                destination.insert(
+                    std::next(destination.cbegin(), current_index),
+                    first,
+                    last
+                );
+                current_index += inserted_size;
+            }
+        }
+    }
+
     array::array(ArrowArray&& array, ArrowSchema&& schema)
         : p_array(array_factory(arrow_proxy(std::move(array), std::move(schema))))
     {
@@ -213,64 +239,21 @@ namespace sparrow
                         source_array.cbegin(),
                         static_cast<std::ptrdiff_t>(last_index)
                     );
-                    using source_input_value = std::remove_cvref_t<decltype(nullable_get(*source_first))>;
-                    using destination_input_value = std::remove_cvref_t<
-                        decltype(nullable_get(std::declval<typename array_type::value_type&>()))>;
-                    constexpr bool can_insert_directly = std::same_as<source_input_value, destination_input_value>;
-
-                    const auto dest_pos = std::next(destination.cbegin(), static_cast<std::ptrdiff_t>(pos_index));
-
                     if (&destination == &source_array)
                     {
-                        // Self-insertion: snapshot first to avoid iterator invalidation.
-                        const std::vector<typename array_type::value_type> temp(source_first, source_last);
-                        auto current_offset = static_cast<std::ptrdiff_t>(pos_index);
-                        for (size_type i = 0; i < count; ++i)
-                        {
-                            destination.insert(
-                                std::next(destination.cbegin(), current_offset),
-                                temp.cbegin(),
-                                temp.cend()
-                            );
-                            current_offset += static_cast<std::ptrdiff_t>(temp.size());
-                        }
-                    }
-                    else if constexpr (can_insert_directly)
-                    {
-                        // Types match, no aliasing: insert directly from source iterators.
-                        const auto elem_count = static_cast<std::ptrdiff_t>(last_index - first_index);
-                        auto current_offset = static_cast<std::ptrdiff_t>(pos_index);
-                        for (size_type i = 0; i < count; ++i)
-                        {
-                            destination.insert(
-                                std::next(destination.cbegin(), current_offset),
-                                source_first,
-                                source_last
-                            );
-                            current_offset += elem_count;
-                        }
+                        const std::vector<typename array_type::value_type> values(source_first, source_last);
+                        insert_repeated(destination, pos_index, values.cbegin(), values.cend(), count);
                     }
                     else
                     {
-                        // Type mismatch (e.g. nullable<string_view> -> nullable<string>):
-                        const auto elem_count = static_cast<std::ptrdiff_t>(last_index - first_index);
-                        const auto converting_view = std::ranges::subrange(source_first, source_last)
-                                                     | std::views::transform(
-                                                         [](const auto& elem) -> typename array_type::value_type
-                                                         {
-                                                             return typename array_type::value_type(elem);
-                                                         }
-                                                     );
-                        auto current_offset = static_cast<std::ptrdiff_t>(pos_index);
-                        for (size_type i = 0; i < count; ++i)
-                        {
-                            destination.insert(
-                                std::next(destination.cbegin(), current_offset),
-                                converting_view.begin(),
-                                converting_view.end()
-                            );
-                            current_offset += elem_count;
-                        }
+                        const auto values = std::ranges::subrange(source_first, source_last)
+                                            | std::views::transform(
+                                                [](const auto& element) -> typename array_type::value_type
+                                                {
+                                                    return typename array_type::value_type(element);
+                                                }
+                                            );
+                        insert_repeated(destination, pos_index, values.begin(), values.end(), count);
                     }
                 }
                 else
@@ -316,7 +299,7 @@ namespace sparrow
                 {
                     auto erase_first = std::next(wrapped_array.cbegin(), static_cast<std::ptrdiff_t>(first_index));
                     auto erase_last = std::next(erase_first, static_cast<std::ptrdiff_t>(count));
-                    static_cast<void>(wrapped_array.erase(erase_first, erase_last));
+                    wrapped_array.erase(erase_first, erase_last);
                 }
                 else
                 {
@@ -330,29 +313,17 @@ namespace sparrow
 
     namespace
     {
-        /**
-         * Converts an array value (nullable_variant) into a layout's typed nullable.
-         * Preserves nullness; converts convertible values (e.g. nullable<double> to
-         * nullable<std::int32_t>); asserts for non-convertible alternatives.
-         *
-         * VERIFIED FACTS (do not re-investigate):
-         * - nullable has a converting copy ctor from other nullable types
-         *   (include/sparrow/utils/nullable.hpp:400) used by typed_value(alt)
-         * - the null alternative must be special-cased: null_type (data_type.hpp:166)
-         *   is an empty struct, not convertible to arithmetic types
-         * - nullable(nullval_t) builds a null nullable (nullable.hpp:360)
-         * - std::visit instantiates the lambda for EVERY alternative, hence the
-         *   requires-guard for non-convertible alternatives (list_value, struct_value...)
-         * - conversions are restricted to same-type copies and arithmetic-to-arithmetic:
-         *   decimal<__int128>::operator std::string() (decimal.hpp:313) does not compile
-         *   on this toolchain, so instantiating nullable<std::string>(nullable<decimal<__int128>>)
-         *   would hard-error; exotic cross-family conversions assert instead.
-         */
-        template <class To, class From>
+        template <typename To, typename From>
         concept same_or_arithmetic = std::same_as<To, From>
                                      || (std::is_arithmetic_v<To> && std::is_arithmetic_v<From>);
 
-        template <class typed_value>
+        template <typename To, typename From>
+        concept convertible_nullable = requires(const From& from) { To(from); }
+                                      && same_or_arithmetic<
+                                          std::remove_cvref_t<decltype(nullable_get(std::declval<const From&>()))>,
+                                          std::remove_cvref_t<decltype(nullable_get(std::declval<To&>()))>>;
+
+        template <typename typed_value>
         typed_value convert_to_typed(const array::value_type& value)
         {
             return std::visit(
@@ -361,9 +332,6 @@ namespace sparrow
                     using alt_type = std::remove_cvref_t<decltype(alt)>;
                     if constexpr (std::same_as<alt_type, nullable<null_type>>)
                     {
-                        // Variant-typed layouts (run_end_encoded, dictionary) take the
-                        // null alternative directly (exact std::variant alternative);
-                        // plain nullable<T> needs the nullval_t constructor.
                         if constexpr (requires { typed_value(alt); })
                         {
                             return typed_value(alt);
@@ -373,13 +341,7 @@ namespace sparrow
                             return typed_value(nullval);
                         }
                     }
-                    else if constexpr (requires {
-                                          typed_value(alt);
-                                          requires same_or_arithmetic<
-                                              std::remove_cvref_t<decltype(nullable_get(alt))>,
-                                              std::remove_cvref_t<decltype(nullable_get(std::declval<typed_value&>()))>
-                                          >;
-                                      })
+                    else if constexpr (convertible_nullable<typed_value, alt_type>)
                     {
                         return typed_value(alt);
                     }
@@ -389,7 +351,11 @@ namespace sparrow
                         return typed_value{};
                     }
                 },
+    #if SPARROW_GCC_11_2_WORKAROUND
+                static_cast<const array::value_type::base_type&>(value)
+    #else
                 value
+    #endif
             );
         }
     }
@@ -400,28 +366,16 @@ namespace sparrow
             [this, &value](const auto& array_impl)
             {
                 using array_type = std::remove_cvref_t<decltype(array_impl)>;
-                array_type& wrapped_array = unwrap_array<array_type>(*p_array);
+                auto& wrapped_array = unwrap_array<array_type>(*p_array);
                 using typed_value = typename array_type::value_type;
-                const typed_value converted = convert_to_typed<typed_value>(value);
 
-                // Check the variant-taking overload FIRST: run_end_encoded_array
-                // (run_end_encoded_array.hpp:365) defines value_type as the variant
-                // itself, so its push_back takes it directly.
                 if constexpr (requires { wrapped_array.push_back(value); })
                 {
                     wrapped_array.push_back(value);
                 }
-                else if constexpr (requires { wrapped_array.push_back(converted); })
+                else if constexpr (requires { wrapped_array.push_back(std::declval<const typed_value&>()); })
                 {
-                    wrapped_array.push_back(converted);
-                }
-                else if constexpr (requires { wrapped_array.insert(wrapped_array.cend(), converted); })
-                {
-                    wrapped_array.insert(wrapped_array.cend(), converted);
-                }
-                else
-                {
-                    SPARROW_ASSERT_TRUE(false);
+                    wrapped_array.push_back(convert_to_typed<typed_value>(value));
                 }
             }
         );
@@ -444,39 +398,18 @@ namespace sparrow
             [this, new_length, &value](const auto& array_impl)
             {
                 using array_type = std::remove_cvref_t<decltype(array_impl)>;
-                array_type& wrapped_array = unwrap_array<array_type>(*p_array);
+                auto& wrapped_array = unwrap_array<array_type>(*p_array);
                 using typed_value = typename array_type::value_type;
-                const typed_value converted = convert_to_typed<typed_value>(value);
 
-                // Variant-taking overload first (run_end_encoded_array::resize),
-                // then the typed-nullable overload (mutable_array_base::resize).
                 if constexpr (requires { wrapped_array.resize(new_length, value); })
                 {
                     wrapped_array.resize(new_length, value);
                 }
-                else if constexpr (requires { wrapped_array.resize(new_length, converted); })
+                else if constexpr (requires {
+                                       wrapped_array.resize(new_length, std::declval<const typed_value&>());
+                                   })
                 {
-                    wrapped_array.resize(new_length, converted);
-                }
-                else
-                {
-                    // ponytail: no native resize on this layout; compose from
-                    // erase/push_back. Growth is O(n^2) insert shifts; add a
-                    // native resize to the layout if that ever matters.
-                    if (new_length < this->size())
-                    {
-                        this->erase(
-                            this->cbegin() + static_cast<iterator::difference_type>(new_length),
-                            this->cend()
-                        );
-                    }
-                    else
-                    {
-                        while (this->size() < new_length)
-                        {
-                            this->push_back(value);
-                        }
-                    }
+                    wrapped_array.resize(new_length, convert_to_typed<typed_value>(value));
                 }
             }
         );

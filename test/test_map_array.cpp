@@ -198,6 +198,87 @@ namespace sparrow
             test::generic_consistency_test(arr);
         }
 
+        TEST_CASE("mutation")
+        {
+            map_array arr = test::make_map_array();
+            map_array source = test::make_map_array();
+            const auto inserted_map = source[1].value();
+
+            arr.insert(arr.cbegin() + 1, make_nullable(inserted_map));
+            REQUIRE_EQ(arr.size(), 5);
+            CHECK_EQ(arr.raw_keys_array()->get_arrow_proxy().length(), 9);
+            CHECK_EQ(detail::array_access::get_arrow_proxy(arr).buffers()[1].size() / sizeof(std::int32_t), 6);
+            CHECK_EQ(detail::array_access::get_arrow_proxy(arr).flags().contains(ArrowFlag::MAP_KEYS_SORTED), true);
+
+            arr.erase(arr.cbegin() + 1);
+            CHECK_EQ(arr.size(), 4);
+            CHECK_EQ(arr.raw_keys_array()->get_arrow_proxy().length(), 6);
+
+            arr.insert(arr.cend(), make_nullable(map_value{}));
+            arr.insert(arr.cend(), make_nullable(map_value{}, false));
+            REQUIRE_EQ(arr.size(), 6);
+            CHECK(arr[4].has_value());
+            CHECK_EQ(arr[4].value().size(), 0);
+            CHECK_FALSE(arr[5].has_value());
+
+            arr.resize(8, make_nullable(map_value{}));
+            CHECK_EQ(arr.size(), 8);
+            CHECK(arr[7].has_value());
+            CHECK_EQ(arr[7].value().size(), 0);
+            arr.resize(4, make_nullable(map_value{}, false));
+            CHECK_EQ(arr.size(), 4);
+
+            array erased_target(test::make_map_array());
+            array erased_source(test::make_map_array());
+            erased_target.insert(
+                erased_target.cend(),
+                erased_source.cbegin(),
+                erased_source.cbegin() + 1
+            );
+            CHECK_EQ(erased_target.size(), 5);
+        }
+
+        TEST_CASE("mutation edge cases")
+        {
+            SUBCASE("zero-count insertion and empty erasure are no-ops")
+            {
+                map_array arr = test::make_map_array();
+                const auto original_size = arr.size();
+
+                arr.insert(arr.cbegin() + 1, make_nullable(map_value{}), 0);
+                arr.erase(arr.cbegin() + 1, arr.cbegin() + 1);
+
+                CHECK_EQ(arr.size(), original_size);
+            }
+
+            SUBCASE("rejects mutations of sliced arrays")
+            {
+                map_array source = test::make_map_array();
+                map_array sliced(detail::array_access::get_arrow_proxy(source).slice(1, 3));
+
+                CHECK_THROWS_AS(sliced.insert(sliced.cbegin(), make_nullable(map_value{})), std::logic_error);
+                CHECK_THROWS_AS(sliced.erase(sliced.cbegin()), std::logic_error);
+            }
+
+            SUBCASE("rejects mutations of unsorted maps")
+            {
+                map_array unsorted(
+                    array(string_array{std::vector<std::string>{"b", "a"}}),
+                    array(primitive_array<std::int32_t>{std::vector<std::int32_t>{1, 2}}),
+                    map_array::offset_from_sizes(std::vector<std::size_t>{2})
+                );
+
+                CHECK_FALSE(
+                    detail::array_access::get_arrow_proxy(unsorted).flags().contains(ArrowFlag::MAP_KEYS_SORTED)
+                );
+                CHECK_THROWS_AS(
+                    unsorted.insert(unsorted.cend(), make_nullable(map_value{})),
+                    std::invalid_argument
+                );
+                CHECK_THROWS_AS(unsorted.erase(unsorted.cbegin()), std::invalid_argument);
+            }
+        }
+
         TEST_CASE("map_value")
         {
             test::map_array_underlying mau;

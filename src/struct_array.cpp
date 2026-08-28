@@ -14,8 +14,12 @@
 
 #include "sparrow/struct_array.hpp"
 
+#include <stdexcept>
+#include <vector>
+
 #include "sparrow/debug/copy_tracker.hpp"
 #include "sparrow/layout/array_factory.hpp"
+#include "sparrow/layout/array_helper.hpp"
 
 namespace sparrow
 {
@@ -117,6 +121,95 @@ namespace sparrow
     {
         get_arrow_proxy().pop_children(n);
         m_children = make_children();
+    }
+
+    namespace
+    {
+        using dynamic_value = array::value_type;
+    }
+
+    void struct_array::resize_values(size_type new_length, const struct_value& value)
+    {
+        const size_type current_size = this->size();
+        if (new_length < current_size)
+        {
+            erase_values(
+                std::next(value_cbegin(), static_cast<std::ptrdiff_t>(new_length)),
+                current_size - new_length
+            );
+        }
+        else if (new_length > current_size)
+        {
+            insert_value(value_cend(), value, new_length - current_size);
+        }
+    }
+
+    struct_array::value_iterator
+    struct_array::insert_value(const_value_iterator pos, const struct_value& value, size_type count)
+    {
+        const auto index = static_cast<size_type>(std::distance(value_cbegin(), pos));
+        if (count == 0)
+        {
+            return std::next(value_begin(), static_cast<std::ptrdiff_t>(index));
+        }
+        if (get_arrow_proxy().offset() != 0)
+        {
+            throw std::logic_error("struct_array::insert_value does not support sliced arrays");
+        }
+
+        const size_type child_count = children_count();
+        const size_type value_count = value.size();
+        const bool is_null_value = value_count == 0 && child_count != 0;
+        if (!is_null_value && value_count != child_count)
+        {
+            throw std::invalid_argument("Struct value has an incompatible number of fields");
+        }
+
+        std::vector<dynamic_value> inserted_values(child_count);
+        for (size_type child_index = 0; child_index < child_count; ++child_index)
+        {
+            inserted_values[child_index] = is_null_value
+                                               ? array_default_value(*m_children[child_index])
+                                               : array_materialize_element(value[child_index]);
+        }
+
+        const size_type old_size = this->size();
+        rebuild_children(
+            old_size + count,
+            [&](std::vector<dynamic_value>& new_values, size_type child_index)
+            {
+                new_values.insert(
+                    new_values.begin() + static_cast<std::ptrdiff_t>(index),
+                    count,
+                    inserted_values[child_index]
+                );
+            }
+        );
+        return std::next(value_begin(), static_cast<std::ptrdiff_t>(index));
+    }
+
+    struct_array::value_iterator struct_array::erase_values(const_value_iterator pos, size_type count)
+    {
+        const auto index = static_cast<size_type>(std::distance(value_cbegin(), pos));
+        if (count == 0)
+        {
+            return std::next(value_begin(), static_cast<std::ptrdiff_t>(index));
+        }
+        if (get_arrow_proxy().offset() != 0)
+        {
+            throw std::logic_error("struct_array::erase_values does not support sliced arrays");
+        }
+
+        const size_type old_size = this->size();
+        rebuild_children(
+            old_size - count,
+            [&](std::vector<dynamic_value>& new_values, size_type)
+            {
+                const auto first = new_values.begin() + static_cast<std::ptrdiff_t>(index);
+                new_values.erase(first, first + static_cast<std::ptrdiff_t>(count));
+            }
+        );
+        return std::next(value_begin(), static_cast<std::ptrdiff_t>(index));
     }
 
 }

@@ -14,6 +14,8 @@
 
 #pragma once
 
+#include <vector>
+
 #include "sparrow/config/config.hpp"
 #include "sparrow/layout/array_wrapper.hpp"
 #include "sparrow/types/data_traits.hpp"
@@ -23,6 +25,8 @@
 
 namespace sparrow
 {
+    class array;
+
     [[nodiscard]] SPARROW_API std::size_t array_size(const array_wrapper& ar);
 
     [[nodiscard]] SPARROW_API bool array_has_value(const array_wrapper& ar, std::size_t index);
@@ -32,4 +36,25 @@ namespace sparrow
 
     [[nodiscard]] SPARROW_API array_traits::inner_value_type
     array_default_element_value(const array_wrapper& ar);
+
+    [[nodiscard]] SPARROW_API array_traits::value_type
+    array_default_value(const array_wrapper& ar);
+
+    [[nodiscard]] SPARROW_API array_traits::value_type
+    array_materialize_element(const array_traits::const_reference& value);
+
+    [[nodiscard]] SPARROW_API array
+    make_array_view(const array_wrapper& source);
+
+    [[nodiscard]] SPARROW_API std::vector<array_traits::value_type>
+    snapshot_array(const array& source);
+
+    SPARROW_API void
+    append_values(array& destination, const std::vector<array_traits::value_type>& values);
+
+    [[nodiscard]] SPARROW_API array
+    array_make_from_element(const array_traits::value_type& value);
+
+    [[nodiscard]] SPARROW_API array
+    array_empty_like(const array& source);
 }

@@ -27,7 +27,7 @@ namespace sparrow
 
     auto struct_value::size() const -> size_type
     {
-        return p_children->size();
+        return p_children == nullptr ? 0 : p_children->size();
     }
 
     bool struct_value::empty() const

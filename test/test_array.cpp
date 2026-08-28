@@ -14,9 +14,11 @@
 
 #include "sparrow/array.hpp"
 #include "sparrow/layout/array_factory.hpp"
+#include "sparrow/layout/array_helper.hpp"
 #include "sparrow/layout/array_wrapper.hpp"
 #include "sparrow/primitive_array.hpp"
 #include "sparrow/struct_array.hpp"
+#include "sparrow/timestamp_array.hpp"
 #include "sparrow/utils/contracts.hpp"
 #include "sparrow/utils/nullable.hpp"
 #include "sparrow/utils/sparrow_exception.hpp"
@@ -584,6 +586,38 @@ namespace sparrow
                 CHECK(destination == array(test::make_int_array({1, 7, 8, 7, 8, 7, 8, 2, 3})));
             }
 
+            SUBCASE("zero count and empty range are no-ops")
+            {
+                array destination(test::make_int_array({1, 2, 3}));
+                array source(test::make_int_array({7, 8}));
+                const auto zero_count = destination.insert(
+                    destination.cbegin() + 1,
+                    source.cbegin(),
+                    source.cend(),
+                    0
+                );
+                const auto empty_range = destination.insert(
+                    destination.cbegin() + 1,
+                    source.cbegin(),
+                    source.cbegin()
+                );
+
+                CHECK_EQ(zero_count, destination.cbegin() + 1);
+                CHECK_EQ(empty_range, destination.cbegin() + 1);
+                CHECK(destination == array(test::make_int_array({1, 2, 3})));
+            }
+
+            SUBCASE("inserts a string range")
+            {
+                array destination(string_array{std::vector<std::string>{"a", "d"}});
+                array source(string_array{std::vector<std::string>{"b", "c"}});
+
+                destination.insert(destination.cbegin() + 1, source.cbegin(), source.cend(), 2);
+
+                const array expected(string_array{std::vector<std::string>{"a", "b", "c", "b", "c", "d"}});
+                CHECK_EQ(destination, expected);
+            }
+
             SUBCASE("pos belonging to a different array throws")
             {
                 array destination(test::make_int_array({1, 2, 3}));
@@ -685,6 +719,16 @@ namespace sparrow
                 CHECK(destination == array(test::make_int_array({1, 2})));
             }
 
+            SUBCASE("empty range is a no-op")
+            {
+                array destination(test::make_int_array({1, 2, 3}));
+
+                const auto iter = destination.erase(destination.cbegin() + 1, destination.cbegin() + 1);
+
+                CHECK_EQ(iter, destination.cbegin() + 1);
+                CHECK(destination == array(test::make_int_array({1, 2, 3})));
+            }
+
             SUBCASE("erase(pos) with iterator from different array throws")
             {
                 array destination(test::make_int_array({1, 2, 3}));
@@ -699,6 +743,177 @@ namespace sparrow
 
                 CHECK_THROWS_AS(destination.erase(destination.cend()), sparrow::contract_assertion_error);
             }
+        }
+
+        TEST_CASE("push_back")
+        {
+            SUBCASE("appends value")
+            {
+                array arr(test::make_int_array({1, 2, 3}));
+                arr.push_back(make_nullable(42));
+                CHECK(arr == array(test::make_int_array({1, 2, 3, 42})));
+            }
+
+            SUBCASE("appends null")
+            {
+                array arr(test::make_int_array({1, 2, 3}));
+                arr.push_back(sparrow::nullable<std::int32_t>{});
+                CHECK_EQ(arr.size(), 4u);
+                CHECK_EQ(arr.null_count(), 1);
+                CHECK_FALSE(arr.back().has_value());
+            }
+
+            SUBCASE("converts value to layout type")
+            {
+                array arr(test::make_int_array({1}));
+                arr.push_back(make_nullable(2.5));
+                CHECK(arr == array(test::make_int_array({1, 2})));
+            }
+
+            SUBCASE("appends the null variant alternative")
+            {
+                array arr(test::make_int_array({1}));
+                arr.push_back(array::value_type{nullable<null_type>{}});
+
+                REQUIRE_EQ(arr.size(), 2u);
+                CHECK_FALSE(arr.back().has_value());
+            }
+
+            SUBCASE("rejects an incompatible value")
+            {
+                array arr(test::make_int_array({1}));
+
+                CHECK_THROWS_AS(arr.push_back(make_nullable(std::string{"text"})), contract_assertion_error);
+            }
+        }
+
+        TEST_CASE("pop_back")
+        {
+            SUBCASE("removes last element")
+            {
+                array arr(test::make_int_array({1, 2, 3}));
+                arr.pop_back();
+                CHECK(arr == array(test::make_int_array({1, 2})));
+            }
+
+            SUBCASE("empty array throws")
+            {
+                array arr(test::make_int_array({}));
+                CHECK_THROWS_AS(arr.pop_back(), sparrow::contract_assertion_error);
+            }
+        }
+
+        TEST_CASE("resize")
+        {
+            SUBCASE("grow with value")
+            {
+                array arr(test::make_int_array({1, 2}));
+                arr.resize(5, make_nullable(9));
+                CHECK(arr == array(test::make_int_array({1, 2, 9, 9, 9})));
+            }
+
+            SUBCASE("grow with nulls")
+            {
+                array arr(test::make_int_array({1, 2}));
+                arr.resize(5);
+                CHECK_EQ(arr.size(), 5u);
+                CHECK_EQ(arr.null_count(), 3);
+            }
+
+            SUBCASE("shrink")
+            {
+                array arr(test::make_int_array({1, 2, 3, 4, 5}));
+                arr.resize(2);
+                CHECK(arr == array(test::make_int_array({1, 2})));
+            }
+
+            SUBCASE("no-op when size unchanged")
+            {
+                array arr(test::make_int_array({1, 2, 3}));
+                arr.resize(3);
+                CHECK(arr == array(test::make_int_array({1, 2, 3})));
+            }
+
+            SUBCASE("grows with a converted value")
+            {
+                array arr(test::make_int_array({1}));
+                arr.resize(3, make_nullable(2.5));
+
+                CHECK(arr == array(test::make_int_array({1, 2, 2})));
+            }
+        }
+
+        TEST_CASE("dynamic value conversion")
+        {
+            SUBCASE("creates null, string, and binary arrays")
+            {
+                const array null_array = array_make_from_element(array::value_type{nullable<null_type>{}});
+                const array string = array_make_from_element(make_nullable(std::string{"text"}));
+                const array binary = array_make_from_element(
+                    make_nullable(std::vector<byte_t>{byte_t{1}, byte_t{2}})
+                );
+
+                CHECK_EQ(null_array.data_type(), data_type::NA);
+                CHECK_FALSE(null_array[0].has_value());
+                CHECK_EQ(string.data_type(), data_type::STRING);
+                CHECK_EQ(string.size(), 1u);
+                CHECK_EQ(binary.data_type(), data_type::BINARY);
+                CHECK_EQ(binary.size(), 1u);
+            }
+
+            SUBCASE("creates timestamp and decimal arrays")
+            {
+                // Timestamp values carry a date::time_zone*, obtained via
+                // date::locate_zone, which requires the IANA timezone database at
+                // runtime. The emscripten environment has none (test_timestamp_array.cpp
+                // is excluded from the wasm build for the same reason,
+                // test/CMakeLists.txt), so timestamp coverage is native-only.
+#if !defined(__EMSCRIPTEN__)
+                const auto timestamp_value = timestamp_second{
+                    date::locate_zone("UTC"),
+                    date::sys_time<std::chrono::seconds>{std::chrono::seconds{1}}
+                };
+                const array timestamp = array_make_from_element(
+                    array::value_type{nullable<timestamp_second>{timestamp_value}}
+                );
+                CHECK_EQ(timestamp.data_type(), data_type::TIMESTAMP_SECONDS);
+                CHECK_EQ(timestamp.size(), 1u);
+#endif
+                const auto decimal_value = decimal<std::int32_t>{123, 2};
+                const array decimal_array = array_make_from_element(make_nullable(decimal_value));
+
+                CHECK_EQ(decimal_array.data_type(), data_type::DECIMAL32);
+                CHECK_EQ(decimal_array.size(), 1u);
+            }
+
+            SUBCASE("rejects nested values")
+            {
+                CHECK_THROWS_AS(array_make_from_element(make_nullable(map_value{})), std::invalid_argument);
+            }
+        }
+
+        TEST_CASE("push_back on string array")
+        {
+            // variable_size_binary path: no native push_back, insert fallback.
+            array arr(sparrow::string_array{std::vector<std::string>{"a", "b"}});
+            arr.push_back(make_nullable(std::string("c")));
+            CHECK(arr == array(sparrow::string_array{std::vector<std::string>{"a", "b", "c"}}));
+        }
+
+        TEST_CASE("resize on string array")
+        {
+            array arr(sparrow::string_array{std::vector<std::string>{"a", "b"}});
+            arr.resize(4, make_nullable(std::string("z")));
+            CHECK(arr == array(sparrow::string_array{std::vector<std::string>{"a", "b", "z", "z"}}));
+            arr.resize(1);
+            CHECK(arr == array(sparrow::string_array{std::vector<std::string>{"a"}}));
+        }
+
+        TEST_CASE("pop_back on string array")
+        {
+            array arr(sparrow::string_array{std::vector<std::string>{"a", "b", "c"}});
+            arr.pop_back();
+            CHECK(arr == array(sparrow::string_array{std::vector<std::string>{"a", "b"}}));
         }
 
         TEST_CASE("const_iterator dereference guards")

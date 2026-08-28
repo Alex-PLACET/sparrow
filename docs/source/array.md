@@ -85,6 +85,10 @@ std::visit([](const auto& arg) { std::cout << arg << '\n'; }, ar[i]);
 std:cout << sp::data_type_to_format(ar.data_type()) << std::endl;
 ```
 
+Like the [typed arrays](#common_apis), `array` supports mutating operations:
+`insert` ,`push_back`, `pop_back` and `resize` (growing fills with nulls or a given value,
+shrinking drops trailing elements).
+
 ### Visit
 
 The visit function allows the user to apply a functor to each element of the array. The functor
