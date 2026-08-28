@@ -434,6 +434,43 @@ namespace sparrow
          */
         SPARROW_API iterator erase(const_iterator first, const_iterator last);
 
+        /**
+         * Appends a copy of \c value to the end of the array.
+         *
+         * @param value The value to append.
+         */
+        SPARROW_API void push_back(const value_type& value);
+
+        /**
+         * Removes the last element of the array.
+         *
+         * Calling pop_back on an empty array causes undefined behavior.
+         */
+        SPARROW_API void pop_back();
+
+        /**
+         * Resizes the array to contain \c new_length elements.
+         *
+         * If the current size is greater than \c new_length, the array is reduced
+         * to its first \c new_length elements. If the current size is less than
+         * \c new_length, additional null values are appended.
+         *
+         * @param new_length The new size of the array.
+         */
+        SPARROW_API void resize(size_type new_length);
+
+        /**
+         * Resizes the array to contain \c new_length elements.
+         *
+         * If the current size is greater than \c new_length, the array is reduced
+         * to its first \c new_length elements. If the current size is less than
+         * \c new_length, additional copies of \c value are appended.
+         *
+         * @param new_length The new size of the array.
+         * @param value The value to initialize the new elements with.
+         */
+        SPARROW_API void resize(size_type new_length, const value_type& value);
+
 
     private:
 

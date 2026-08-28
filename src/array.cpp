@@ -328,6 +328,160 @@ namespace sparrow
         return cbegin() + static_cast<iterator::difference_type>(first_index);
     }
 
+    namespace
+    {
+        /**
+         * Converts an array value (nullable_variant) into a layout's typed nullable.
+         * Preserves nullness; converts convertible values (e.g. nullable<double> to
+         * nullable<std::int32_t>); asserts for non-convertible alternatives.
+         *
+         * VERIFIED FACTS (do not re-investigate):
+         * - nullable has a converting copy ctor from other nullable types
+         *   (include/sparrow/utils/nullable.hpp:400) used by typed_value(alt)
+         * - the null alternative must be special-cased: null_type (data_type.hpp:166)
+         *   is an empty struct, not convertible to arithmetic types
+         * - nullable(nullval_t) builds a null nullable (nullable.hpp:360)
+         * - std::visit instantiates the lambda for EVERY alternative, hence the
+         *   requires-guard for non-convertible alternatives (list_value, struct_value...)
+         * - conversions are restricted to same-type copies and arithmetic-to-arithmetic:
+         *   decimal<__int128>::operator std::string() (decimal.hpp:313) does not compile
+         *   on this toolchain, so instantiating nullable<std::string>(nullable<decimal<__int128>>)
+         *   would hard-error; exotic cross-family conversions assert instead.
+         */
+        template <class To, class From>
+        concept same_or_arithmetic = std::same_as<To, From>
+                                     || (std::is_arithmetic_v<To> && std::is_arithmetic_v<From>);
+
+        template <class typed_value>
+        typed_value convert_to_typed(const array::value_type& value)
+        {
+            return std::visit(
+                [](const auto& alt) -> typed_value
+                {
+                    using alt_type = std::remove_cvref_t<decltype(alt)>;
+                    if constexpr (std::same_as<alt_type, nullable<null_type>>)
+                    {
+                        // Variant-typed layouts (run_end_encoded, dictionary) take the
+                        // null alternative directly (exact std::variant alternative);
+                        // plain nullable<T> needs the nullval_t constructor.
+                        if constexpr (requires { typed_value(alt); })
+                        {
+                            return typed_value(alt);
+                        }
+                        else
+                        {
+                            return typed_value(nullval);
+                        }
+                    }
+                    else if constexpr (requires {
+                                          typed_value(alt);
+                                          requires same_or_arithmetic<
+                                              std::remove_cvref_t<decltype(nullable_get(alt))>,
+                                              std::remove_cvref_t<decltype(nullable_get(std::declval<typed_value&>()))>
+                                          >;
+                                      })
+                    {
+                        return typed_value(alt);
+                    }
+                    else
+                    {
+                        SPARROW_ASSERT_TRUE(false);
+                        return typed_value{};
+                    }
+                },
+                value
+            );
+        }
+    }
+
+    void array::push_back(const value_type& value)
+    {
+        visit(
+            [this, &value](const auto& array_impl)
+            {
+                using array_type = std::remove_cvref_t<decltype(array_impl)>;
+                array_type& wrapped_array = unwrap_array<array_type>(*p_array);
+                using typed_value = typename array_type::value_type;
+                const typed_value converted = convert_to_typed<typed_value>(value);
+
+                // Check the variant-taking overload FIRST: run_end_encoded_array
+                // (run_end_encoded_array.hpp:365) defines value_type as the variant
+                // itself, so its push_back takes it directly.
+                if constexpr (requires { wrapped_array.push_back(value); })
+                {
+                    wrapped_array.push_back(value);
+                }
+                else if constexpr (requires { wrapped_array.push_back(converted); })
+                {
+                    wrapped_array.push_back(converted);
+                }
+                else if constexpr (requires { wrapped_array.insert(wrapped_array.cend(), converted); })
+                {
+                    wrapped_array.insert(wrapped_array.cend(), converted);
+                }
+                else
+                {
+                    SPARROW_ASSERT_TRUE(false);
+                }
+            }
+        );
+    }
+
+    void array::pop_back()
+    {
+        SPARROW_ASSERT_TRUE(!empty());
+        erase(std::prev(cend()));
+    }
+
+    void array::resize(size_type new_length)
+    {
+        resize(new_length, value_type{});
+    }
+
+    void array::resize(size_type new_length, const value_type& value)
+    {
+        visit(
+            [this, new_length, &value](const auto& array_impl)
+            {
+                using array_type = std::remove_cvref_t<decltype(array_impl)>;
+                array_type& wrapped_array = unwrap_array<array_type>(*p_array);
+                using typed_value = typename array_type::value_type;
+                const typed_value converted = convert_to_typed<typed_value>(value);
+
+                // Variant-taking overload first (run_end_encoded_array::resize),
+                // then the typed-nullable overload (mutable_array_base::resize).
+                if constexpr (requires { wrapped_array.resize(new_length, value); })
+                {
+                    wrapped_array.resize(new_length, value);
+                }
+                else if constexpr (requires { wrapped_array.resize(new_length, converted); })
+                {
+                    wrapped_array.resize(new_length, converted);
+                }
+                else
+                {
+                    // ponytail: no native resize on this layout; compose from
+                    // erase/push_back. Growth is O(n^2) insert shifts; add a
+                    // native resize to the layout if that ever matters.
+                    if (new_length < this->size())
+                    {
+                        this->erase(
+                            this->cbegin() + static_cast<iterator::difference_type>(new_length),
+                            this->cend()
+                        );
+                    }
+                    else
+                    {
+                        while (this->size() < new_length)
+                        {
+                            this->push_back(value);
+                        }
+                    }
+                }
+            }
+        );
+    }
+
     arrow_proxy& array::get_arrow_proxy()
     {
         return p_array->get_arrow_proxy();
