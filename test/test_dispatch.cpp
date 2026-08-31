@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
+#include "sparrow/array.hpp"
 #include "sparrow/layout/array_helper.hpp"
-#include "sparrow/layout/array_registry.hpp"
+#include "sparrow/primitive_array.hpp"
+#include "sparrow/variable_size_binary_array.hpp"
 
 #include "../test/external_array_data_creation.hpp"
 #include "doctest/doctest.h"
@@ -69,5 +70,46 @@ namespace sparrow
         }
 
         TEST_CASE_TEMPLATE_APPLY(array_element_id, testing_types);
+
+        TEST_CASE("array wrapper helpers")
+        {
+            primitive_array<std::int32_t> typed_array(
+                std::vector<nullable<std::int32_t>>{make_nullable(42), make_nullable(std::int32_t{}, false)}
+            );
+            array_wrapper_impl<primitive_array<std::int32_t>> wrapper(&typed_array);
+
+            CHECK(array_has_value(wrapper, 0));
+            CHECK_FALSE(array_has_value(wrapper, 1));
+            CHECK_EQ(std::get<std::int32_t>(array_default_element_value(wrapper)), 0);
+            const auto default_value = array_default_value(wrapper);
+            CHECK(std::get<nullable<std::int32_t>>(default_value).has_value());
+            CHECK_EQ(std::get<nullable<std::int32_t>>(default_value).value(), 0);
+
+            const auto view = make_array_view(wrapper);
+            CHECK_EQ(view.size(), typed_array.size());
+            CHECK_EQ(std::get<primitive_array<std::int32_t>::const_reference>(view[0]).value(), 42);
+        }
+
+        TEST_CASE("array materialization and rebuilding helpers")
+        {
+            array source(string_array(std::vector<nullable<std::string>>{make_nullable(std::string("one"))}));
+            const auto materialized = array_materialize_element(source[0]);
+            const auto& text = std::get<nullable<std::string>>(materialized).value();
+            CHECK_EQ(text, "one");
+
+            const auto snapshot = snapshot_array(source);
+            CHECK_EQ(snapshot.size(), 1);
+            CHECK_EQ(std::get<nullable<std::string>>(snapshot[0]).value(), "one");
+
+            array rebuilt = array_empty_like(source);
+            CHECK(rebuilt.empty());
+            append_values(rebuilt, snapshot);
+            CHECK_EQ(rebuilt.size(), 1);
+            CHECK_EQ(std::get<string_array::const_reference>(rebuilt[0]).value(), "one");
+
+            const auto single_element = array_make_from_element(materialized);
+            CHECK_EQ(single_element.size(), 1);
+            CHECK_EQ(std::get<string_array::const_reference>(single_element[0]).value(), "one");
+        }
     }
 }

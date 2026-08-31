@@ -314,6 +314,56 @@ namespace sparrow
             }
         }
 
+        TEST_CASE("mutation")
+        {
+            auto proxy = test::make_sparse_union_proxy("+us:3,4", 4);
+            sparse_union_array uarr(std::move(proxy));
+
+            uarr.insert(
+                uarr.cbegin() + 1,
+                array_traits::value_type{make_nullable(std::int32_t(42))}
+            );
+
+            REQUIRE_EQ(uarr.size(), 5);
+            CHECK_NULLABLE_VARIANT_EQ(uarr[1], std::int32_t(42));
+            CHECK_EQ(detail::array_access::get_arrow_proxy(uarr).children().size(), 3);
+            CHECK_EQ(detail::array_access::get_arrow_proxy(uarr).format(), "+us:3,4,0");
+            for (const auto& child : detail::array_access::get_arrow_proxy(uarr).children())
+            {
+                CHECK_EQ(child.length(), 5);
+            }
+
+            uarr.erase(uarr.cbegin() + 1);
+            CHECK_EQ(uarr.size(), 4);
+            CHECK_NULLABLE_VARIANT_EQ(uarr[1], std::uint16_t(1));
+
+            std::vector<array_traits::value_type> inserted{
+                make_nullable(std::int32_t(7)),
+                make_nullable(std::int32_t(8))
+            };
+            uarr.insert(uarr.cend(), inserted.cbegin(), inserted.cend());
+            CHECK_EQ(uarr.size(), 6);
+            CHECK_NULLABLE_VARIANT_EQ(uarr[4], std::int32_t(7));
+            CHECK_NULLABLE_VARIANT_EQ(uarr[5], std::int32_t(8));
+
+            uarr.resize(8, array_traits::value_type{make_nullable(std::int32_t(9))});
+            CHECK_EQ(uarr.size(), 8);
+            CHECK_NULLABLE_VARIANT_EQ(uarr[6], std::int32_t(9));
+            CHECK_NULLABLE_VARIANT_EQ(uarr[7], std::int32_t(9));
+            uarr.resize(4);
+            CHECK_EQ(uarr.size(), 4);
+
+            uarr.resize(5);
+            CHECK_EQ(uarr.size(), 5);
+            CHECK(!uarr[4].has_value());
+            CHECK_EQ(detail::array_access::get_arrow_proxy(uarr).children().size(), 4);
+            CHECK_EQ(detail::array_access::get_arrow_proxy(uarr).format(), "+us:3,4,0,1");
+            for (const auto& child : detail::array_access::get_arrow_proxy(uarr).children())
+            {
+                CHECK_EQ(child.length(), 5);
+            }
+        }
+
 #if defined(__cpp_lib_format)
         TEST_CASE("formatting")
         {
@@ -541,6 +591,48 @@ namespace sparrow
                 uarr[3]
 #endif
             );
+        }
+
+        TEST_CASE("mutation")
+        {
+            auto proxy = test::make_dense_union_proxy("+ud:3,4", 2);
+            dense_union_array uarr(std::move(proxy));
+
+            uarr.insert(
+                uarr.cbegin() + 1,
+                array_traits::value_type{make_nullable(float32_t(9.0f))}
+            );
+
+            REQUIRE_EQ(uarr.size(), 5);
+            CHECK_NULLABLE_VARIANT_EQ(uarr[1], float32_t(9.0f));
+            const auto& proxy_after_insert = detail::array_access::get_arrow_proxy(uarr);
+            REQUIRE_EQ(proxy_after_insert.children().size(), 2);
+            CHECK_EQ(proxy_after_insert.children()[0].length(), 3);
+            CHECK_EQ(proxy_after_insert.children()[1].length(), 2);
+
+            const auto& offsets = proxy_after_insert.buffers()[1];
+            const auto* offset_data = reinterpret_cast<const std::int32_t*>(offsets.data());
+            CHECK_EQ(offset_data[0], 0);
+            CHECK_EQ(offset_data[1], 1);
+            CHECK_EQ(offset_data[2], 0);
+            CHECK_EQ(offset_data[3], 2);
+            CHECK_EQ(offset_data[4], 1);
+            CHECK_EQ(proxy_after_insert.format(), "+ud:3,4");
+
+            uarr.erase(uarr.cbegin() + 1);
+            CHECK_EQ(uarr.size(), 4);
+            CHECK_NULLABLE_VARIANT_EQ(uarr[1], std::uint16_t(0));
+            CHECK_EQ(detail::array_access::get_arrow_proxy(uarr).children()[0].length(), 2);
+
+            array erased_union(std::move(uarr));
+            array source_union(erased_union);
+            erased_union.insert(
+                erased_union.cbegin() + 2,
+                source_union.cbegin(),
+                source_union.cbegin() + 1
+            );
+            CHECK_EQ(erased_union.size(), 5);
+            CHECK_NULLABLE_VARIANT_EQ(erased_union[2], float32_t(0.0f));
         }
 
 #if defined(__cpp_lib_format)
