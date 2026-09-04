@@ -1301,14 +1301,14 @@ namespace sparrow
     template <std::ranges::sized_range T, class CR, layout_offset OT, typename Ext>
     constexpr auto variable_size_binary_array_impl<T, CR, OT, Ext>::offsets_end() -> offset_iterator
     {
-        return offset(size() + 1);
+        return offsets_begin() + static_cast<difference_type>(size()) + 1;
     }
 
     template <std::ranges::sized_range T, class CR, layout_offset OT, typename Ext>
     constexpr auto variable_size_binary_array_impl<T, CR, OT, Ext>::offsets_cend() const
         -> const_offset_iterator
     {
-        return offset(size() + 1);
+        return offsets_cbegin() + static_cast<difference_type>(size()) + 1;
     }
 
     template <std::ranges::sized_range T, class CR, layout_offset OT, typename Ext>
@@ -1416,6 +1416,7 @@ namespace sparrow
     {
         auto& offset_buffer = get_arrow_proxy().get_array_private_data()->buffers()[OFFSET_BUFFER_INDEX];
         const auto idx = static_cast<size_t>(std::distance(offsets_cbegin(), pos));
+        const size_t raw_idx = idx + static_cast<size_t>(this->get_arrow_proxy().offset());
         auto offset_buffer_adaptor = make_buffer_adaptor<OT>(offset_buffer);
         const offset_type cumulative_size = value_size * static_cast<offset_type>(count);
 
@@ -1428,16 +1429,16 @@ namespace sparrow
 
         // Adjust offsets for subsequent elements
         std::for_each(
-            sparrow::next(offset_buffer_adaptor.begin(), idx + 1),
+            sparrow::next(offset_buffer_adaptor.begin(), raw_idx),
             offset_buffer_adaptor.end(),
             [cumulative_size](auto& offset)
             {
                 offset += cumulative_size;
             }
         );
-        offset_buffer_adaptor.insert(sparrow::next(offset_buffer_adaptor.cbegin(), idx + 1), count, 0);
+        offset_buffer_adaptor.insert(sparrow::next(offset_buffer_adaptor.cbegin(), raw_idx), count, 0);
         // Put the right values in the new offsets
-        for (size_t i = idx + 1; i < idx + 1 + count; ++i)
+        for (size_t i = raw_idx; i < raw_idx + count; ++i)
         {
             offset_buffer_adaptor[i] = offset_buffer_adaptor[i - 1] + value_size;
         }
@@ -1487,7 +1488,11 @@ namespace sparrow
                 return static_cast<offset_type>(value.size());
             }
         );
-        insert_offsets(offset(idx + 1), sizes_of_each_value.begin(), sizes_of_each_value.end());
+        insert_offsets(
+            offsets_cbegin() + static_cast<difference_type>(idx) + 1,
+            sizes_of_each_value.begin(),
+            sizes_of_each_value.end()
+        );
         return sparrow::next(value_begin(), idx);
     }
 
@@ -1505,6 +1510,7 @@ namespace sparrow
         auto& offset_buffer = get_arrow_proxy().get_array_private_data()->buffers()[OFFSET_BUFFER_INDEX];
         auto offset_buffer_adaptor = make_buffer_adaptor<OT>(offset_buffer);
         const auto idx = std::distance(offsets_cbegin(), pos);
+        const auto raw_idx = idx + static_cast<std::ptrdiff_t>(this->get_arrow_proxy().offset());
         // GCC 13 false-positive: transform_view iterators yield scalar OT values, never null
 #ifdef __GNUC__
 #    pragma GCC diagnostic push
@@ -1526,13 +1532,13 @@ namespace sparrow
         offset_buffer_adaptor.resize(offset_buffer_adaptor.size() + static_cast<size_t>(sizes_count));
         // Move the offsets to make space for the new offsets
         std::move_backward(
-            offset_buffer_adaptor.begin() + idx,
+            offset_buffer_adaptor.begin() + raw_idx,
             offset_buffer_adaptor.end() - sizes_count,
             offset_buffer_adaptor.end()
         );
         // Adjust offsets for subsequent elements
         std::for_each(
-            offset_buffer_adaptor.begin() + idx + sizes_count,
+            offset_buffer_adaptor.begin() + raw_idx + sizes_count,
             offset_buffer_adaptor.end(),
             [cumulative_sizes](auto& offset)
             {
@@ -1541,7 +1547,7 @@ namespace sparrow
         );
         // Put the right values in the new offsets
         InputIt it = first_sizes;
-        for (size_t i = static_cast<size_t>(idx + 1); i < static_cast<size_t>(idx + sizes_count + 1); ++i)
+        for (size_t i = static_cast<size_t>(raw_idx); i < static_cast<size_t>(raw_idx + sizes_count); ++i)
         {
             // GCC 13 false-positive: iterator is bounded and valid within the loop
 #ifdef __GNUC__
@@ -1554,7 +1560,7 @@ namespace sparrow
 #endif
             ++it;
         }
-        return offset(static_cast<size_t>(idx));
+        return offsets_begin() + idx;
     }
 
     template <std::ranges::sized_range T, class CR, layout_offset OT, typename Ext>
@@ -1595,6 +1601,7 @@ namespace sparrow
         SPARROW_ASSERT_TRUE(pos >= offsets_cbegin());
         SPARROW_ASSERT_TRUE(pos <= offsets_cend());
         const size_t index = static_cast<size_t>(std::distance(offsets_cbegin(), pos));
+        const size_t raw_index = index + static_cast<size_t>(this->get_arrow_proxy().offset());
         if (count == 0)
         {
             return offset(index);
@@ -1606,14 +1613,14 @@ namespace sparrow
         const OT difference = offset_end_value - offset_start_value;
         // move the offsets after the erased ones
         std::move(
-            sparrow::next(offset_buffer_adaptor.begin(), index + count + 1),
+            sparrow::next(offset_buffer_adaptor.begin(), raw_index + count),
             offset_buffer_adaptor.end(),
-            sparrow::next(offset_buffer_adaptor.begin(), index + 1)
+            sparrow::next(offset_buffer_adaptor.begin(), raw_index)
         );
         offset_buffer_adaptor.resize(offset_buffer_adaptor.size() - count);
         // adjust the offsets for the subsequent elements
         std::for_each(
-            sparrow::next(offset_buffer_adaptor.begin(), index + 1),
+            sparrow::next(offset_buffer_adaptor.begin(), raw_index),
             offset_buffer_adaptor.end(),
             [difference](OT& offset)
             {
