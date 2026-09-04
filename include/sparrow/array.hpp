@@ -106,12 +106,6 @@ namespace sparrow
         return detail::array_access::get_arrow_proxy(a).extract_schema();
     }
 
-    template <layout_or_array A>
-    std::pair<ArrowArray, ArrowSchema> extract_arrow_structures(A&& a)
-    {
-        arrow_proxy& proxy = detail::array_access::get_arrow_proxy(a);
-        return std::make_pair(proxy.extract_array(), proxy.extract_schema());
-    }
 }
 
 #if defined(__cpp_lib_format)

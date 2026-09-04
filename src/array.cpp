@@ -16,6 +16,7 @@
 
 #include <stdexcept>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "sparrow/arrow_interface/arrow_array.hpp"
@@ -240,7 +241,6 @@ namespace sparrow
                     );
                     if (&destination == &source_array)
                     {
-                        // Self-insertion: snapshot first to avoid iterator invalidation.
                         const std::vector<typename array_type::value_type> values(source_first, source_last);
                         insert_repeated(destination, pos_index, values.cbegin(), values.cend(), count);
                     }
@@ -299,7 +299,7 @@ namespace sparrow
                 {
                     auto erase_first = std::next(wrapped_array.cbegin(), static_cast<std::ptrdiff_t>(first_index));
                     auto erase_last = std::next(erase_first, static_cast<std::ptrdiff_t>(count));
-                    static_cast<void>(wrapped_array.erase(erase_first, erase_last));
+                    wrapped_array.erase(erase_first, erase_last);
                 }
                 else
                 {
@@ -309,6 +309,110 @@ namespace sparrow
         );
 
         return cbegin() + static_cast<iterator::difference_type>(first_index);
+    }
+
+    namespace
+    {
+        template <typename To, typename From>
+        concept same_or_arithmetic = std::same_as<To, From>
+                                     || (std::is_arithmetic_v<To> && std::is_arithmetic_v<From>);
+
+        template <typename To, typename From>
+        concept convertible_nullable = requires(const From& from) { To(from); }
+                                      && same_or_arithmetic<
+                                          std::remove_cvref_t<decltype(nullable_get(std::declval<const From&>()))>,
+                                          std::remove_cvref_t<decltype(nullable_get(std::declval<To&>()))>>;
+
+        template <typename typed_value>
+        typed_value convert_to_typed(const array::value_type& value)
+        {
+            return std::visit(
+                [](const auto& alt) -> typed_value
+                {
+                    using alt_type = std::remove_cvref_t<decltype(alt)>;
+                    if constexpr (std::same_as<alt_type, nullable<null_type>>)
+                    {
+                        if constexpr (requires { typed_value(alt); })
+                        {
+                            return typed_value(alt);
+                        }
+                        else
+                        {
+                            return typed_value(nullval);
+                        }
+                    }
+                    else if constexpr (convertible_nullable<typed_value, alt_type>)
+                    {
+                        return typed_value(alt);
+                    }
+                    else
+                    {
+                        SPARROW_ASSERT_TRUE(false);
+                        return typed_value{};
+                    }
+                },
+    #if SPARROW_GCC_11_2_WORKAROUND
+                static_cast<const array::value_type::base_type&>(value)
+    #else
+                value
+    #endif
+            );
+        }
+    }
+
+    void array::push_back(const value_type& value)
+    {
+        visit(
+            [this, &value](const auto& array_impl)
+            {
+                using array_type = std::remove_cvref_t<decltype(array_impl)>;
+                auto& wrapped_array = unwrap_array<array_type>(*p_array);
+                using typed_value = typename array_type::value_type;
+
+                if constexpr (requires { wrapped_array.push_back(value); })
+                {
+                    wrapped_array.push_back(value);
+                }
+                else if constexpr (requires { wrapped_array.push_back(std::declval<const typed_value&>()); })
+                {
+                    wrapped_array.push_back(convert_to_typed<typed_value>(value));
+                }
+            }
+        );
+    }
+
+    void array::pop_back()
+    {
+        SPARROW_ASSERT_TRUE(!empty());
+        erase(std::prev(cend()));
+    }
+
+    void array::resize(size_type new_length)
+    {
+        resize(new_length, value_type{});
+    }
+
+    void array::resize(size_type new_length, const value_type& value)
+    {
+        visit(
+            [this, new_length, &value](const auto& array_impl)
+            {
+                using array_type = std::remove_cvref_t<decltype(array_impl)>;
+                auto& wrapped_array = unwrap_array<array_type>(*p_array);
+                using typed_value = typename array_type::value_type;
+
+                if constexpr (requires { wrapped_array.resize(new_length, value); })
+                {
+                    wrapped_array.resize(new_length, value);
+                }
+                else if constexpr (requires {
+                                       wrapped_array.resize(new_length, std::declval<const typed_value&>());
+                                   })
+                {
+                    wrapped_array.resize(new_length, convert_to_typed<typed_value>(value));
+                }
+            }
+        );
     }
 
     arrow_proxy& array::get_arrow_proxy()
