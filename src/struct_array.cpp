@@ -17,6 +17,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "sparrow/array.hpp"
 #include "sparrow/debug/copy_tracker.hpp"
 #include "sparrow/layout/array_factory.hpp"
 #include "sparrow/layout/array_helper.hpp"
