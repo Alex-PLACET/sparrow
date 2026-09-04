@@ -23,6 +23,8 @@
 
 namespace sparrow
 {
+    class map_array;
+
     class SPARROW_API map_value
     {
     public:
@@ -75,13 +77,14 @@ namespace sparrow
         size_type find_index(const key_type& key) const noexcept;
         const_reference value(size_type i) const;
 
-        const array_wrapper* p_flat_keys;
-        const array_wrapper* p_flat_items;
-        size_type m_index_begin;
-        size_type m_index_end;
-        bool m_keys_sorted;
+        const array_wrapper* p_flat_keys = nullptr;
+        const array_wrapper* p_flat_items = nullptr;
+        size_type m_index_begin = 0u;
+        size_type m_index_end = 0u;
+        bool m_keys_sorted = false;
 
         friend class detail::layout_value_functor<const map_value, const_reference>;
+        friend class map_array;
     };
 
     SPARROW_API
