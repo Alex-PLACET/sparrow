@@ -30,6 +30,7 @@
 #include "sparrow/layout/array_bitmap_base.hpp"
 #include "sparrow/layout/array_factory.hpp"
 #include "sparrow/layout/array_helper.hpp"
+#include "sparrow/layout/array_helper.hpp"
 #include "sparrow/layout/array_wrapper.hpp"
 #include "sparrow/layout/layout_utils.hpp"
 #include "sparrow/layout/nested_value_types.hpp"
@@ -123,10 +124,12 @@ namespace sparrow
      * ```
      */
     class struct_array final : public mutable_array_bitmap_base<struct_array>
+    class struct_array final : public mutable_array_bitmap_base<struct_array>
     {
     public:
 
         using self_type = struct_array;
+        using base_type = mutable_array_bitmap_base<self_type>;
         using base_type = mutable_array_bitmap_base<self_type>;
         using inner_types = array_inner_types<self_type>;
         using value_iterator = typename inner_types::value_iterator;
@@ -145,6 +148,12 @@ namespace sparrow
         using value_type = nullable<inner_value_type>;
         using const_reference = nullable<inner_const_reference, bitmap_const_reference>;
         using iterator_tag = base_type::iterator_tag;
+        using iterator = typename base_type::iterator;
+        using const_iterator = typename base_type::const_iterator;
+
+        using base_type::insert;
+        using base_type::push_back;
+        using base_type::resize;
         using iterator = typename base_type::iterator;
         using const_iterator = typename base_type::const_iterator;
 
@@ -457,6 +466,38 @@ namespace sparrow
         SPARROW_API value_iterator erase_values(const_value_iterator pos, size_type count);
 
         /**
+         * @brief Rebuilds every child array from its current values and updates the length.
+         *
+         * Each child is snapshotted value-by-value, transformed by \p transform, then
+         * rebuilt (empty_like + append) and swapped in. Used by insert_value and
+         * erase_values, which share this whole flow and differ only in the transform.
+         *
+         * @param new_length The length the struct array must have after the rebuild.
+         * @param transform Callable invoked as `transform(values, child_index)` with the
+         *                  child's snapshotted values (in-out), before the child is rebuilt.
+         */
+        template <class TRANSFORM>
+        void rebuild_children(size_type new_length, TRANSFORM&& transform)
+        {
+            std::vector<array> new_children;
+            new_children.reserve(children_count());
+            for (std::size_t child_index = 0; child_index < children_count(); ++child_index)
+            {
+                auto new_values = snapshot_array(make_array_view(*m_children[child_index]));
+                std::forward<TRANSFORM>(transform)(new_values, child_index);
+                array child = make_array_view(*m_children[child_index]);
+                array new_child = array_empty_like(child);
+                append_values(new_child, new_values);
+                new_children.push_back(std::move(new_child));
+            }
+            get_arrow_proxy().set_length(new_length);
+            for (std::size_t child_index = 0; child_index < new_children.size(); ++child_index)
+            {
+                set_child(std::move(new_children[child_index]), child_index);
+            }
+        }
+
+        /**
          * @brief Gets mutable reference to struct at specified index.
          *
          * @param i Index of the struct to access
@@ -528,6 +569,7 @@ namespace sparrow
         // friend classes
         friend class array_crtp_base<self_type>;
         friend class mutable_array_base<self_type>;
+        friend class mutable_array_base<self_type>;
 
         // needs access to this->value(i)
         friend class detail::layout_value_functor<self_type, inner_value_type>;
@@ -562,7 +604,11 @@ namespace sparrow
         size_type count = 0;
         for (auto it = first; it != last; ++it, ++count)
         {
-            insert_value(std::next(value_cbegin(), static_cast<std::ptrdiff_t>(index + count)), *it, 1);
+            insert_value(
+                std::next(value_cbegin(), static_cast<std::ptrdiff_t>(index + count)),
+                *it,
+                1
+            );
         }
         return std::next(value_begin(), static_cast<std::ptrdiff_t>(index));
     }
