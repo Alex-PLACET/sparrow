@@ -124,13 +124,12 @@ namespace sparrow
      * ```
      */
     class struct_array final : public mutable_array_bitmap_base<struct_array>
-    class struct_array final : public mutable_array_bitmap_base<struct_array>
     {
     public:
 
         using self_type = struct_array;
         using base_type = mutable_array_bitmap_base<self_type>;
-        using base_type = mutable_array_bitmap_base<self_type>;
+
         using inner_types = array_inner_types<self_type>;
         using value_iterator = typename inner_types::value_iterator;
         using const_value_iterator = typename inner_types::const_value_iterator;
@@ -148,12 +147,6 @@ namespace sparrow
         using value_type = nullable<inner_value_type>;
         using const_reference = nullable<inner_const_reference, bitmap_const_reference>;
         using iterator_tag = base_type::iterator_tag;
-        using iterator = typename base_type::iterator;
-        using const_iterator = typename base_type::const_iterator;
-
-        using base_type::insert;
-        using base_type::push_back;
-        using base_type::resize;
         using iterator = typename base_type::iterator;
         using const_iterator = typename base_type::const_iterator;
 
@@ -464,38 +457,6 @@ namespace sparrow
         insert_value(const_value_iterator pos, const struct_value& value, size_type count);
 
         SPARROW_API value_iterator erase_values(const_value_iterator pos, size_type count);
-
-        /**
-         * @brief Rebuilds every child array from its current values and updates the length.
-         *
-         * Each child is snapshotted value-by-value, transformed by \p transform, then
-         * rebuilt (empty_like + append) and swapped in. Used by insert_value and
-         * erase_values, which share this whole flow and differ only in the transform.
-         *
-         * @param new_length The length the struct array must have after the rebuild.
-         * @param transform Callable invoked as `transform(values, child_index)` with the
-         *                  child's snapshotted values (in-out), before the child is rebuilt.
-         */
-        template <class TRANSFORM>
-        void rebuild_children(size_type new_length, TRANSFORM&& transform)
-        {
-            std::vector<array> new_children;
-            new_children.reserve(children_count());
-            for (std::size_t child_index = 0; child_index < children_count(); ++child_index)
-            {
-                auto new_values = snapshot_array(make_array_view(*m_children[child_index]));
-                std::forward<TRANSFORM>(transform)(new_values, child_index);
-                array child = make_array_view(*m_children[child_index]);
-                array new_child = array_empty_like(child);
-                append_values(new_child, new_values);
-                new_children.push_back(std::move(new_child));
-            }
-            get_arrow_proxy().set_length(new_length);
-            for (std::size_t child_index = 0; child_index < new_children.size(); ++child_index)
-            {
-                set_child(std::move(new_children[child_index]), child_index);
-            }
-        }
 
         /**
          * @brief Gets mutable reference to struct at specified index.
