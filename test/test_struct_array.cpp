@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <stdexcept>
 #include <string_view>
 
 #include "sparrow/array.hpp"
@@ -149,11 +150,92 @@ namespace sparrow
                 CHECK_FALSE(arr[1].has_value());
 
                 const auto child2 = arr[2].value();
+
                 CHECK_NULLABLE_VARIANT_EQ(child2[0], std::int16_t(2));
                 CHECK_NULLABLE_VARIANT_EQ(child2[1], float32_t(6.0f));
                 CHECK_NULLABLE_VARIANT_EQ(child2[2], std::int32_t(10));
 
                 CHECK_FALSE(arr[3].has_value());
+            }
+        }
+
+        TEST_CASE("mutation")
+        {
+            struct_array arr(test::make_struct_proxy<std::int32_t, std::uint8_t>(3));
+            struct_array source(test::make_struct_proxy<std::int32_t, std::uint8_t>(3));
+            const auto inserted_struct = source[1].value();
+
+            arr.insert(arr.cbegin() + 1, make_nullable(inserted_struct));
+            REQUIRE_EQ(arr.size(), 4);
+            CHECK_EQ(arr.raw_child(0)->get_arrow_proxy().length(), 4);
+            CHECK_EQ(arr.raw_child(1)->get_arrow_proxy().length(), 4);
+            CHECK_NULLABLE_VARIANT_EQ(arr[1].value()[0], std::int32_t(1));
+
+            arr.insert(arr.cbegin() + 2, make_nullable(struct_value{}, false));
+            REQUIRE_EQ(arr.size(), 5);
+            CHECK_FALSE(arr[2].has_value());
+            CHECK_EQ(arr.raw_child(0)->get_arrow_proxy().length(), 5);
+            CHECK_EQ(arr.raw_child(1)->get_arrow_proxy().length(), 5);
+
+            arr.erase(arr.cbegin() + 1, arr.cbegin() + 3);
+            CHECK_EQ(arr.size(), 3);
+            CHECK_EQ(arr.raw_child(0)->get_arrow_proxy().length(), 3);
+            CHECK_EQ(arr.raw_child(1)->get_arrow_proxy().length(), 3);
+
+            arr.resize(5, make_nullable(source[0].value()));
+            CHECK_EQ(arr.size(), 5);
+            CHECK_NULLABLE_VARIANT_EQ(arr[4].value()[0], std::int32_t(0));
+            arr.resize(2, make_nullable(struct_value{}, false));
+            CHECK_EQ(arr.size(), 2);
+
+            array erased_target(test::make_struct_proxy<std::int32_t, std::uint8_t>(3));
+            array erased_source(test::make_struct_proxy<std::int32_t, std::uint8_t>(3));
+            erased_target.insert(
+                erased_target.cend(),
+                erased_source.cbegin(),
+                erased_source.cbegin() + 1
+            );
+            CHECK_EQ(erased_target.size(), 4);
+        }
+
+        TEST_CASE("mutation edge cases")
+        {
+            SUBCASE("zero-count insertion and empty erasure are no-ops")
+            {
+                struct_array arr(test::make_struct_proxy<std::int32_t, std::uint8_t>(3));
+                const auto original_size = arr.size();
+                std::vector<nullable<struct_value>> empty_values;
+
+                arr.insert(arr.cbegin() + 1, make_nullable(struct_value{}), 0);
+                arr.insert(arr.cbegin() + 1, empty_values.cbegin(), empty_values.cend());
+                arr.erase(arr.cbegin() + 1, arr.cbegin() + 1);
+
+                CHECK_EQ(arr.size(), original_size);
+            }
+
+            SUBCASE("rejects mutations of sliced arrays")
+            {
+                struct_array source(test::make_struct_proxy<std::int32_t, std::uint8_t>(3));
+                struct_array sliced(detail::array_access::get_arrow_proxy(source).slice(1, 3));
+
+                CHECK_THROWS_AS(
+                    sliced.insert(sliced.cbegin(), make_nullable(struct_value{})),
+                    std::logic_error
+                );
+                CHECK_THROWS_AS(sliced.erase(sliced.cbegin()), std::logic_error);
+            }
+
+            SUBCASE("rejects an incompatible field count")
+            {
+                struct_array arr(test::make_struct_proxy<std::int32_t, std::uint8_t>(3));
+                struct_array incompatible(
+                    std::vector<array>{array(primitive_array<std::int32_t>{std::vector<std::int32_t>{1}})}
+                );
+
+                CHECK_THROWS_AS(
+                    arr.insert(arr.cend(), make_nullable(incompatible[0].value())),
+                    std::invalid_argument
+                );
             }
         }
     };

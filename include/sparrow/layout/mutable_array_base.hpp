@@ -113,6 +113,7 @@ namespace sparrow
         {
             SPARROW_ASSERT_TRUE(pos >= this->cbegin())
             SPARROW_ASSERT_TRUE(pos <= this->cend());
+            const size_type old_size = this->size();
             if constexpr (std::random_access_iterator<InputIt>)
             {
                 SPARROW_ASSERT_TRUE(first <= last);
@@ -140,7 +141,7 @@ namespace sparrow
             );
             const difference_type count = std::distance(first, last);
             // The following must be done after modifying the bitmap and values
-            this->get_arrow_proxy().set_length(this->size() + static_cast<size_t>(count));
+            this->get_arrow_proxy().set_length(old_size + static_cast<size_t>(count));
             return sparrow::next(this->begin(), distance);
         }
 
@@ -297,12 +298,12 @@ namespace sparrow
     {
         SPARROW_ASSERT_TRUE(pos >= this->cbegin());
         SPARROW_ASSERT_TRUE(pos <= this->cend());
+        const size_type old_size = this->size();
         const size_t distance = static_cast<size_t>(std::distance(this->cbegin(), pos));
         auto& derived = this->derived_cast();
         derived.insert_bitmap(sparrow::next(this->bitmap_cbegin(), distance), value.has_value(), count);
         derived.insert_value(sparrow::next(derived.value_cbegin(), distance), value.get(), count);
-        this->get_arrow_proxy().set_length(this->size() + count);  // Must be done after resizing the bitmap
-                                                                   // and values
+        this->get_arrow_proxy().set_length(old_size + count);  // Must be done after resizing the bitmap and values
         return sparrow::next(this->begin(), distance);
     }
 
@@ -348,6 +349,7 @@ namespace sparrow
         SPARROW_ASSERT_TRUE(first <= last);
         SPARROW_ASSERT_TRUE(this->cbegin() <= first)
         SPARROW_ASSERT_TRUE(last <= this->cend());
+        const size_type old_size = this->size();
         const difference_type first_index = std::distance(this->cbegin(), first);
         if (first == last)
         {
@@ -357,8 +359,7 @@ namespace sparrow
         auto& derived = this->derived_cast();
         derived.erase_bitmap(sparrow::next(this->bitmap_cbegin(), first_index), count);
         derived.erase_values(sparrow::next(derived.value_cbegin(), first_index), count);
-        this->get_arrow_proxy().set_length(this->size() - count);  // Must be done after modifying the bitmap
-                                                                   // and values
+        this->get_arrow_proxy().set_length(old_size - count);  // Must be done after modifying the bitmap and values
         return sparrow::next(begin(), first_index);
     }
 

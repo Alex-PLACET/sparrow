@@ -1146,6 +1146,13 @@ namespace sparrow
         using base_type = std::variant<T...>;
         using base_type::base_type;
 
+        template <class U, mpl::boolean_like B>
+            requires((std::same_as<nullable<U, B>, T> || ...))
+        constexpr nullable_variant(const nullable<U, B>& value)
+            : base_type(std::in_place_type<nullable<U, B>>, value)
+        {
+        }
+
         constexpr nullable_variant(const nullable_variant&) = default;
         constexpr nullable_variant(nullable_variant&&) noexcept = default;
 
