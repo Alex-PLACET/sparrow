@@ -211,6 +211,58 @@ namespace sparrow
     {
         using dynamic_value = array::value_type;
 
+        struct mutation_snapshot
+        {
+            std::vector<dynamic_value> keys;
+            std::vector<dynamic_value> items;
+        };
+
+        mutation_snapshot snapshot_for_mutation(
+            const map_array& map,
+            bool keys_sorted,
+            const char* operation
+        )
+        {
+            const auto& proxy = detail::array_access::get_arrow_proxy(map);
+            if (proxy.offset() != 0)
+            {
+                throw std::logic_error(operation);
+            }
+            if (!keys_sorted)
+            {
+                throw std::invalid_argument("Cannot mutate a map_array with unsorted keys");
+            }
+
+            return {
+                snapshot_array(make_array_view(*map.raw_keys_array())),
+                snapshot_array(make_array_view(*map.raw_items_array()))
+            };
+        }
+
+        template <bool MOVE_SOURCE>
+        void append_range(
+            std::vector<dynamic_value>& destination,
+            std::vector<dynamic_value>& source,
+            std::size_t begin,
+            std::size_t end
+        )
+        {
+            auto first = source.begin() + static_cast<std::ptrdiff_t>(begin);
+            auto last = source.begin() + static_cast<std::ptrdiff_t>(end);
+            if constexpr (MOVE_SOURCE)
+            {
+                destination.insert(
+                    destination.end(),
+                    std::make_move_iterator(first),
+                    std::make_move_iterator(last)
+                );
+            }
+            else
+            {
+                destination.insert(destination.end(), first, last);
+            }
+        }
+
         /**
          * @brief Appends the entries [begin, end) of the source lists and records the new offset.
          *
@@ -228,28 +280,8 @@ namespace sparrow
             std::size_t end
         )
         {
-            auto keys_first = source_keys.begin() + static_cast<std::ptrdiff_t>(begin);
-            auto keys_last = source_keys.begin() + static_cast<std::ptrdiff_t>(end);
-            auto items_first = source_items.begin() + static_cast<std::ptrdiff_t>(begin);
-            auto items_last = source_items.begin() + static_cast<std::ptrdiff_t>(end);
-            if constexpr (MOVE_SOURCE)
-            {
-                destination_keys.insert(
-                    destination_keys.end(),
-                    std::make_move_iterator(keys_first),
-                    std::make_move_iterator(keys_last)
-                );
-                destination_items.insert(
-                    destination_items.end(),
-                    std::make_move_iterator(items_first),
-                    std::make_move_iterator(items_last)
-                );
-            }
-            else
-            {
-                destination_keys.insert(destination_keys.end(), keys_first, keys_last);
-                destination_items.insert(destination_items.end(), items_first, items_last);
-            }
+            append_range<MOVE_SOURCE>(destination_keys, source_keys, begin, end);
+            append_range<MOVE_SOURCE>(destination_items, source_items, begin, end);
             SPARROW_ASSERT_TRUE(std::in_range<std::int32_t>(destination_keys.size()));
             destination_offsets.push_back(static_cast<std::int32_t>(destination_keys.size()));
         }
@@ -285,7 +317,7 @@ namespace sparrow
         /**
          * @brief Rebuilds the flat key/item lists and offsets from an explicit row plan.
          *
-         * Rows are appended in plan order; each old row copies the entries
+         * Rows are appended in plan order. Each old row copies the entries
          * [offsets[row], offsets[row + 1]) of the old flat lists, each inserted row
          * copies the entries [0, inserted_entry_size) of the inserted lists.
          *
@@ -371,8 +403,7 @@ namespace sparrow
             throw std::invalid_argument("Cannot mutate a map_array with unsorted keys");
         }
 
-        auto old_keys = snapshot_array(make_array_view(*raw_keys_array()));
-        auto old_items = snapshot_array(make_array_view(*raw_items_array()));
+        auto [old_keys, old_items] = snapshot_for_mutation(*this, m_keys_sorted, "map_array::insert_value");
 
         std::vector<dynamic_value> inserted_keys;
         std::vector<dynamic_value> inserted_items;
@@ -422,17 +453,7 @@ namespace sparrow
         {
             return std::next(value_begin(), static_cast<std::ptrdiff_t>(index));
         }
-        if (get_arrow_proxy().offset() != 0)
-        {
-            throw std::logic_error("map_array::erase_values does not support sliced arrays");
-        }
-        if (!m_keys_sorted)
-        {
-            throw std::invalid_argument("Cannot mutate a map_array with unsorted keys");
-        }
-
-        auto old_keys = snapshot_array(make_array_view(*raw_keys_array()));
-        auto old_items = snapshot_array(make_array_view(*raw_items_array()));
+        auto [old_keys, old_items] = snapshot_for_mutation(*this, m_keys_sorted, "map_array::erase_values");
         const size_type old_size = size();
         const auto old_offsets = p_list_offsets;
 
