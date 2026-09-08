@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <utility>
+
 #include "sparrow/array.hpp"
 #include "sparrow/layout/array_factory.hpp"
+#include "sparrow/layout/array_helper.hpp"
 #include "sparrow/layout/array_wrapper.hpp"
 #include "sparrow/primitive_array.hpp"
 #include "sparrow/struct_array.hpp"
@@ -23,6 +26,7 @@
 
 #include "../test/external_array_data_creation.hpp"
 #include "doctest/doctest.h"
+#include "test_utils.hpp"
 
 namespace sparrow
 {
@@ -65,6 +69,76 @@ namespace sparrow
 
     TEST_SUITE("array")
     {
+        TEST_CASE("array helper overloads")
+        {
+            using value_type = array_traits::value_type;
+
+            SUBCASE("array_make_from_element preserves copied and moved strings")
+            {
+                const value_type copied_value{nullable<std::string>("copied")};
+                const array copied_array = array_make_from_element(copied_value);
+                REQUIRE_EQ(copied_array.size(), 1);
+                CHECK_NULLABLE_VARIANT_EQ(copied_array[0], std::string_view("copied"));
+
+                value_type moved_value{nullable<std::string>("moved")};
+                const array moved_array = array_make_from_element(std::move(moved_value));
+                REQUIRE_EQ(moved_array.size(), 1);
+                CHECK_NULLABLE_VARIANT_EQ(moved_array[0], std::string_view("moved"));
+            }
+
+            SUBCASE("array_make_from_element preserves copied and moved binary values")
+            {
+                const std::vector<byte_t> expected{byte_t(1), byte_t(2)};
+
+                const value_type copied_value{nullable<std::vector<byte_t>>(expected)};
+                const array copied_array = array_make_from_element(copied_value);
+                const auto copied_element = array_materialize_element(copied_array[0]);
+                REQUIRE(std::get<nullable<std::vector<byte_t>>>(copied_element).has_value());
+                CHECK_EQ(std::get<nullable<std::vector<byte_t>>>(copied_element).get(), expected);
+
+                value_type moved_value{nullable<std::vector<byte_t>>(expected)};
+                const array moved_array = array_make_from_element(std::move(moved_value));
+                const auto moved_element = array_materialize_element(moved_array[0]);
+                REQUIRE(std::get<nullable<std::vector<byte_t>>>(moved_element).has_value());
+                CHECK_EQ(std::get<nullable<std::vector<byte_t>>>(moved_element).get(), expected);
+            }
+
+            SUBCASE("array_make_from_element preserves null and primitive values")
+            {
+                const value_type null_value{nullable<null_type>{}};
+                const array null_array = array_make_from_element(null_value);
+                REQUIRE_EQ(null_array.size(), 1);
+                CHECK_FALSE(null_array[0].has_value());
+
+                value_type primitive_value{nullable<std::int32_t>(42)};
+                const array primitive_array = array_make_from_element(std::move(primitive_value));
+                REQUIRE_EQ(primitive_array.size(), 1);
+                CHECK_NULLABLE_VARIANT_EQ(primitive_array[0], std::int32_t(42));
+            }
+
+            SUBCASE("append_values supports copied and moved vectors")
+            {
+                array destination = array_make_from_element(value_type{nullable<std::int32_t>(0)});
+
+                const std::vector<value_type> copied_values{
+                    value_type{nullable<std::int32_t>(1)},
+                    value_type{nullable<std::int32_t>(2)}
+                };
+                append_values(destination, copied_values);
+
+                std::vector<value_type> moved_values;
+                moved_values.emplace_back(nullable<std::int32_t>(3));
+                moved_values.emplace_back(nullable<std::int32_t>(4));
+                append_values(destination, std::move(moved_values));
+
+                REQUIRE_EQ(destination.size(), 5);
+                for (std::int32_t i = 0; i < 5; ++i)
+                {
+                    CHECK_NULLABLE_VARIANT_EQ(destination[static_cast<std::size_t>(i)], i);
+                }
+            }
+        }
+
         TEST_CASE_TEMPLATE_DEFINE("constructor", AR, array_constructor_id)
         {
             constexpr size_t size = 10;

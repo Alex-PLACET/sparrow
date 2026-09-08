@@ -15,6 +15,7 @@
 #include "sparrow/layout/array_helper.hpp"
 
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 
@@ -52,6 +53,102 @@ namespace sparrow
                 }
             );
         }
+
+        template <class Value>
+        array array_make_from_element_impl(Value&& value)
+        {
+            using value_type = std::remove_cvref_t<Value>;
+            using value_base_type = typename value_type::base_type;
+
+            auto visitor = []<typename T>(T&& typed_value) -> array
+            {
+                using nullable_type = std::remove_cvref_t<T>;
+                using source_value_type = std::remove_cvref_t<typename nullable_type::value_type>;
+                const bool has_value = typed_value.has_value();
+                auto make_stored_value = [&]() -> nullable<source_value_type>
+                {
+                    if constexpr (std::is_lvalue_reference_v<T>)
+                    {
+                        return nullable<source_value_type>(source_value_type(typed_value.get()), has_value);
+                    }
+                    else
+                    {
+                        return nullable<source_value_type>(std::forward<T>(typed_value));
+                    }
+                };
+
+                if constexpr (std::same_as<source_value_type, null_type>)
+                {
+                    return array{null_array(1)};
+                }
+                else if constexpr (std::same_as<source_value_type, std::string>)
+                {
+                    std::vector<nullable<std::string>> values;
+                    values.emplace_back(make_stored_value());
+                    return array{string_array(std::move(values))};
+                }
+                else if constexpr (std::same_as<source_value_type, std::vector<byte_t>>)
+                {
+                    std::vector<nullable<source_value_type>> values;
+                    values.emplace_back(make_stored_value());
+                    return array{binary_array(std::move(values))};
+                }
+                else if constexpr (std::same_as<source_value_type, list_value>
+                                   || std::same_as<source_value_type, map_value>
+                                   || std::same_as<source_value_type, struct_value>)
+                {
+                    throw std::invalid_argument("Cannot create a union child from a nested value");
+                }
+                else
+                {
+                    if constexpr (mpl::is_type_instance_of_v<source_value_type, timestamp>)
+                    {
+                        const auto* timezone = typed_value.get().get_time_zone();
+                        std::vector<nullable<source_value_type>> values;
+                        values.emplace_back(make_stored_value());
+                        return array{timestamp_array<source_value_type>(timezone, std::move(values))};
+                    }
+                    else if constexpr (decimal_type<source_value_type>)
+                    {
+                        using integer_type = typename source_value_type::integer_type;
+                        std::vector<integer_type> storage_values{typed_value.get().storage()};
+                        std::vector<bool> validity{has_value};
+                        constexpr std::size_t precision = sizeof(integer_type) == 4
+                                                               ? 9
+                                                               : sizeof(integer_type) == 8
+                                                                     ? 18
+                                                                     : sizeof(integer_type) == 16 ? 38 : 76;
+                        return array(
+                            decimal_array<source_value_type>(
+                                std::move(storage_values),
+                                std::move(validity),
+                                precision,
+                                typed_value.get().scale()
+                            )
+                        );
+                    }
+                    else
+                    {
+                        std::vector<nullable<source_value_type>> values;
+                        values.emplace_back(make_stored_value());
+                        return array(primitive_array_impl<source_value_type>(std::move(values)));
+                    }
+                }
+            };
+
+#if SPARROW_GCC_11_2_WORKAROUND
+            if constexpr (std::is_lvalue_reference_v<Value>)
+            {
+                return std::visit(visitor, static_cast<const value_base_type&>(value));
+            }
+            else
+            {
+                return std::visit(visitor, static_cast<value_base_type&&>(std::move(value)));
+            }
+#else
+            return std::visit(visitor, std::forward<Value>(value));
+#endif
+        }
     }
 
     array make_array_view(const array_wrapper& source)
@@ -75,6 +172,15 @@ namespace sparrow
         for (const auto& value : values)
         {
             array source = array_make_from_element(value);
+            destination.insert(destination.cend(), source.cbegin(), source.cend());
+        }
+    }
+
+    void append_values(array& destination, std::vector<array_traits::value_type>&& values)
+    {
+        for (auto& value : std::move(values))
+        {
+            array source = array_make_from_element(std::move(value));
             destination.insert(destination.cend(), source.cbegin(), source.cend());
         }
     }
@@ -182,88 +288,12 @@ namespace sparrow
 
     array array_make_from_element(const array_traits::value_type& value)
     {
-        using value_base_type = typename array_traits::value_type::base_type;
+        return array_make_from_element_impl(value);
+    }
 
-        return std::visit(
-            []<typename T>(const T& typed_value) -> array
-            {
-                using nullable_type = T;
-                using source_value_type = std::remove_cvref_t<typename nullable_type::value_type>;
-
-                if constexpr (std::same_as<source_value_type, null_type>)
-                {
-                    return array{null_array(1)};
-                }
-                else if constexpr (std::same_as<source_value_type, std::string>)
-                {
-                    std::vector<nullable<std::string>> values;
-                    values.emplace_back(
-                        std::string(typed_value.get()),
-                        typed_value.has_value()
-                    );
-                    return array{string_array(std::move(values))};
-                }
-                else if constexpr (std::same_as<source_value_type, std::vector<byte_t>>)
-                {
-                    using value_type = std::vector<byte_t>;
-                    const auto& bytes = typed_value.get();
-                    std::vector<nullable<value_type>> values;
-                    values.emplace_back(
-                        value_type(bytes.begin(), bytes.end()),
-                        typed_value.has_value()
-                    );
-                    return array{binary_array(std::move(values))};
-                }
-                else if constexpr (std::same_as<source_value_type, list_value>
-                                   || std::same_as<source_value_type, map_value>
-                                   || std::same_as<source_value_type, struct_value>)
-                {
-                    throw std::invalid_argument("Cannot create a union child from a nested value");
-                }
-                else
-                {
-                    std::vector<nullable<source_value_type>> values;
-                    values.emplace_back(
-                        source_value_type(typed_value.get()),
-                        typed_value.has_value()
-                    );
-                    if constexpr (mpl::is_type_instance_of_v<source_value_type, timestamp>)
-                    {
-                        return array{
-                            timestamp_array<source_value_type>(typed_value.get().get_time_zone(), std::move(values))
-                        };
-                    }
-                    else if constexpr (decimal_type<source_value_type>)
-                    {
-                        using integer_type = typename source_value_type::integer_type;
-                        std::vector<integer_type> storage_values{typed_value.get().storage()};
-                        std::vector<bool> validity{typed_value.has_value()};
-                        constexpr std::size_t precision = sizeof(integer_type) == 4
-                                                               ? 9
-                                                               : sizeof(integer_type) == 8
-                                                                     ? 18
-                                                                     : sizeof(integer_type) == 16 ? 38 : 76;
-                        return array(
-                            decimal_array<source_value_type>(
-                                std::move(storage_values),
-                                std::move(validity),
-                                precision,
-                                typed_value.get().scale()
-                            )
-                        );
-                    }
-                    else
-                    {
-                        return array(primitive_array_impl<source_value_type>(std::move(values)));
-                    }
-                }
-            },
-#if SPARROW_GCC_11_2_WORKAROUND
-            static_cast<const value_base_type&>(value)
-#else
-            value
-#endif
-        );
+    array array_make_from_element(array_traits::value_type&& value)
+    {
+        return array_make_from_element_impl(std::move(value));
     }
 
     array array_empty_like(const array& source)

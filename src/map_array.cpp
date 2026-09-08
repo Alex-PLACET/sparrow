@@ -147,8 +147,8 @@ namespace sparrow
         bool sorted = true;
         for (std::size_t i = 0; i + 1 < offsets.size(); ++i)
         {
-            std::size_t index_begin = offsets[i];
-            std::size_t index_end = offsets[i + 1];
+            const std::size_t index_begin = offsets[i];
+            const std::size_t index_end = offsets[i + 1];
             sorted = flat_keys.visit(
                 [index_begin, index_end]<class T>(const T& ar) -> bool
                 {
@@ -184,8 +184,8 @@ namespace sparrow
     {
         array keys_array = array_empty_like(make_array_view(*raw_keys_array()));
         array items_array = array_empty_like(make_array_view(*raw_items_array()));
-        append_values(keys_array, flat_keys);
-        append_values(items_array, flat_items);
+        append_values(keys_array, std::move(flat_keys));
+        append_values(items_array, std::move(flat_items));
 
         if (!check_keys_sorted(keys_array, list_offsets))
         {

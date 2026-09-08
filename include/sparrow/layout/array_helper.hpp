@@ -52,8 +52,14 @@ namespace sparrow
     SPARROW_API void
     append_values(array& destination, const std::vector<array_traits::value_type>& values);
 
+    SPARROW_API void
+    append_values(array& destination, std::vector<array_traits::value_type>&& values);
+
     [[nodiscard]] SPARROW_API array
     array_make_from_element(const array_traits::value_type& value);
+
+    [[nodiscard]] SPARROW_API array
+    array_make_from_element(array_traits::value_type&& value);
 
     [[nodiscard]] SPARROW_API array
     array_empty_like(const array& source);
