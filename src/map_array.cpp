@@ -14,6 +14,7 @@
 
 #include "sparrow/map_array.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -286,22 +287,6 @@ namespace sparrow
             destination_offsets.push_back(static_cast<std::int32_t>(destination_keys.size()));
         }
 
-        /**
-         * One row of the rebuilt map: either an old row (is_inserted == false,
-         * old_row = its index) or a copy of the inserted entry (is_inserted == true).
-         */
-        struct row_source
-        {
-            row_source(bool inserted, std::size_t old_row_index)
-                : is_inserted(inserted)
-                , old_row(old_row_index)
-            {
-            }
-
-            bool is_inserted;
-            std::size_t old_row;
-        };
-
         struct rebuilt_entries
         {
             rebuilt_entries()
@@ -317,9 +302,10 @@ namespace sparrow
         /**
          * @brief Rebuilds the flat key/item lists and offsets from an explicit row plan.
          *
-         * Rows are appended in plan order. Each old row copies the entries
-         * [offsets[row], offsets[row + 1]) of the old flat lists, each inserted row
-         * copies the entries [0, inserted_entry_size) of the inserted lists.
+         * Old rows are stored as a separate index array. Inserted rows are represented
+         * by their insertion position and count instead of per-row records. Each old
+         * row copies the entries [offsets[row], offsets[row + 1]) of the old flat lists;
+         * each inserted row copies the entries [0, inserted_entry_size) of the inserted lists.
          *
          * @return The rebuilt flat lists and a fresh offset buffer (starting at 0).
          */
@@ -327,44 +313,51 @@ namespace sparrow
             std::vector<dynamic_value>&& old_keys,
             std::vector<dynamic_value>&& old_items,
             map_array::offset_type* old_offsets,
-            std::span<const row_source> rows,
+            std::span<const std::size_t> old_rows,
+            std::size_t inserted_at,
+            std::size_t inserted_count,
             std::vector<dynamic_value>&& inserted_keys,
             std::vector<dynamic_value>&& inserted_items,
             std::size_t inserted_entry_size
         )
         {
             rebuilt_entries out;
-            const std::size_t inserted_row_count = std::ranges::count_if(
-                rows,
-                [](const row_source& row)
-                {
-                    return row.is_inserted;
-                }
-            );
-            out.keys.reserve(old_keys.size() + inserted_row_count * inserted_entry_size);
-            out.items.reserve(old_items.size() + inserted_row_count * inserted_entry_size);
-            out.offsets.reserve(rows.size() + 1);
+            out.keys.reserve(old_keys.size() + inserted_count * inserted_entry_size);
+            out.items.reserve(old_items.size() + inserted_count * inserted_entry_size);
+            out.offsets.reserve(old_rows.size() + inserted_count + 1);
             out.offsets.push_back(0);
-            for (const auto& row : rows)
+
+            const auto append_old_row = [&](std::size_t old_row)
             {
-                if (row.is_inserted)
-                {
-                    append_entry<false>(
-                        out.keys,
-                        out.items,
-                        out.offsets,
-                        inserted_keys,
-                        inserted_items,
-                        0,
-                        inserted_entry_size
-                    );
-                }
-                else
-                {
-                    const auto begin = static_cast<std::size_t>(old_offsets[row.old_row]);
-                    const auto end = static_cast<std::size_t>(old_offsets[row.old_row + 1]);
-                    append_entry<true>(out.keys, out.items, out.offsets, old_keys, old_items, begin, end);
-                }
+                const auto begin = static_cast<std::size_t>(old_offsets[old_row]);
+                const auto end = static_cast<std::size_t>(old_offsets[old_row + 1]);
+                append_entry<true>(out.keys, out.items, out.offsets, old_keys, old_items, begin, end);
+            };
+            const auto append_inserted_row = [&]
+            {
+                append_entry<false>(
+                    out.keys,
+                    out.items,
+                    out.offsets,
+                    inserted_keys,
+                    inserted_items,
+                    0,
+                    inserted_entry_size
+                );
+            };
+
+            const auto old_prefix_count = std::min(inserted_at, old_rows.size());
+            for (std::size_t i = 0; i < old_prefix_count; ++i)
+            {
+                append_old_row(old_rows[i]);
+            }
+            for (std::size_t i = 0; i < inserted_count; ++i)
+            {
+                append_inserted_row();
+            }
+            for (std::size_t i = old_prefix_count; i < old_rows.size(); ++i)
+            {
+                append_old_row(old_rows[i]);
             }
             return out;
         }
@@ -417,23 +410,24 @@ namespace sparrow
 
         const size_type old_size = size();
         const auto old_offsets = p_list_offsets;
-        std::vector<row_source> rows;
-        rows.reserve(old_size + count);
+        std::vector<std::size_t> old_rows;
+        old_rows.reserve(old_size);
         for (size_type row = 0; row < index; ++row)
         {
-            rows.emplace_back(false, row);
+            old_rows.push_back(row);
         }
-        rows.insert(rows.end(), count, row_source(true, 0));
         for (size_type row = index; row < old_size; ++row)
         {
-            rows.emplace_back(false, row);
+            old_rows.push_back(row);
         }
 
         auto rebuilt = rebuild_flat_entries(
             std::move(old_keys),
             std::move(old_items),
             old_offsets,
-            rows,
+            old_rows,
+            index,
+            count,
             std::move(inserted_keys),
             std::move(inserted_items),
             value.size()
@@ -457,17 +451,27 @@ namespace sparrow
         const size_type old_size = size();
         const auto old_offsets = p_list_offsets;
 
-        std::vector<row_source> rows;
-        rows.reserve(old_size - count);
+        std::vector<std::size_t> old_rows;
+        old_rows.reserve(old_size - count);
         for (size_type row = 0; row < old_size; ++row)
         {
             if (row < index || row >= index + count)
             {
-                rows.emplace_back(false, row);
+                old_rows.push_back(row);
             }
         }
 
-        auto rebuilt = rebuild_flat_entries(std::move(old_keys), std::move(old_items), old_offsets, rows, {}, {}, 0);
+        auto rebuilt = rebuild_flat_entries(
+            std::move(old_keys),
+            std::move(old_items),
+            old_offsets,
+            old_rows,
+            old_rows.size(),
+            0,
+            {},
+            {},
+            0
+        );
         replace_contents(
             std::move(rebuilt.keys),
             std::move(rebuilt.items),
