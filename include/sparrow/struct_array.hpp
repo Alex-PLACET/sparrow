@@ -30,7 +30,6 @@
 #include "sparrow/layout/array_bitmap_base.hpp"
 #include "sparrow/layout/array_factory.hpp"
 #include "sparrow/layout/array_helper.hpp"
-#include "sparrow/layout/array_helper.hpp"
 #include "sparrow/layout/array_wrapper.hpp"
 #include "sparrow/layout/layout_utils.hpp"
 #include "sparrow/layout/nested_value_types.hpp"
@@ -129,7 +128,6 @@ namespace sparrow
 
         using self_type = struct_array;
         using base_type = mutable_array_bitmap_base<self_type>;
-
         using inner_types = array_inner_types<self_type>;
         using value_iterator = typename inner_types::value_iterator;
         using const_value_iterator = typename inner_types::const_value_iterator;
@@ -530,7 +528,6 @@ namespace sparrow
         // friend classes
         friend class array_crtp_base<self_type>;
         friend class mutable_array_base<self_type>;
-        friend class mutable_array_base<self_type>;
 
         // needs access to this->value(i)
         friend class detail::layout_value_functor<self_type, inner_value_type>;
@@ -565,11 +562,7 @@ namespace sparrow
         size_type count = 0;
         for (auto it = first; it != last; ++it, ++count)
         {
-            insert_value(
-                std::next(value_cbegin(), static_cast<std::ptrdiff_t>(index + count)),
-                *it,
-                1
-            );
+            insert_value(std::next(value_cbegin(), static_cast<std::ptrdiff_t>(index + count)), *it, 1);
         }
         return std::next(value_begin(), static_cast<std::ptrdiff_t>(index));
     }
