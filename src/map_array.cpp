@@ -19,7 +19,7 @@
 #include <utility>
 #include <vector>
 
-#include "sparrow/array.hpp"
+#include "sparrow/array.hpp"  // IWYU pragma: keep
 #include "sparrow/debug/copy_tracker.hpp"
 #include "sparrow/layout/array_helper.hpp"
 
@@ -120,7 +120,15 @@ namespace sparrow
     auto map_array::value(size_type i) const -> inner_const_reference
     {
         const auto offsets = make_list_offsets();
-        return {raw_keys_array(), raw_items_array(), offsets[i], offsets[i + 1], m_keys_sorted};
+        const auto index_begin = static_cast<size_type>(offsets[i]);
+        const auto index_end = static_cast<size_type>(offsets[i + 1]);
+        return map_value(
+            raw_keys_array(),
+            raw_items_array(),
+            index_begin,
+            index_end,
+            m_keys_sorted
+        );
     }
 
     auto map_array::make_list_offsets() const -> offset_span_type
