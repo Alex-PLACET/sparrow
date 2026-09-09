@@ -36,7 +36,6 @@ namespace sparrow
 
     map_array::map_array(arrow_proxy proxy)
         : base_type(std::move(proxy))
-        , p_list_offsets(make_list_offsets())
         , p_entries_array(make_entries_array())
         , m_keys_sorted(get_keys_sorted())
     {
@@ -55,7 +54,6 @@ namespace sparrow
 
     map_array::map_array(const self_type& rhs)
         : base_type(rhs)
-        , p_list_offsets(make_list_offsets())
         , p_entries_array(make_entries_array())
         , m_keys_sorted(rhs.m_keys_sorted)
     {
@@ -68,7 +66,6 @@ namespace sparrow
         if (this != &rhs)
         {
             base_type::operator=(rhs);
-            p_list_offsets = make_list_offsets();
             p_entries_array = make_entries_array();
             m_keys_sorted = rhs.m_keys_sorted;
         }
@@ -78,7 +75,6 @@ namespace sparrow
     const array_wrapper* map_array::raw_keys_array() const
     {
         return unwrap_array<struct_array>(*p_entries_array).raw_child(std::size_t(0));
-        ;
     }
 
     array_wrapper* map_array::raw_keys_array()
@@ -123,14 +119,17 @@ namespace sparrow
 
     auto map_array::value(size_type i) const -> inner_const_reference
     {
-        return map_value(raw_keys_array(), raw_items_array(), p_list_offsets[i], p_list_offsets[i + 1], m_keys_sorted);
+        const auto offsets = make_list_offsets();
+        return {raw_keys_array(), raw_items_array(), offsets[i], offsets[i + 1], m_keys_sorted};
     }
 
-    auto map_array::make_list_offsets() const -> offset_type*
+    auto map_array::make_list_offsets() const -> offset_span_type
     {
-        return reinterpret_cast<offset_type*>(
-            this->get_arrow_proxy().buffers()[OFFSET_BUFFER_INDEX].data() + this->get_arrow_proxy().offset()
-        );
+        const auto& proxy = this->get_arrow_proxy();
+        const auto& offset_buffer = proxy.buffers()[OFFSET_BUFFER_INDEX];
+        const auto offset_count = offset_buffer.size() / sizeof(std::int32_t);
+        return offset_span_type(offset_buffer.template data<std::int32_t>(), offset_count)
+            .subspan(static_cast<std::size_t>(proxy.offset()));
     }
 
     cloning_ptr<array_wrapper> map_array::make_entries_array() const
@@ -200,7 +199,6 @@ namespace sparrow
         entries.set_child(std::move(items_array), 1);
 
         get_arrow_proxy().set_buffer(OFFSET_BUFFER_INDEX, std::move(list_offsets).extract_storage());
-        p_list_offsets = make_list_offsets();
 
         auto flags = get_arrow_proxy().flags();
         flags.insert(ArrowFlag::MAP_KEYS_SORTED);
@@ -235,8 +233,8 @@ namespace sparrow
             }
 
             return {
-                snapshot_array(make_array_view(*map.raw_keys_array())),
-                snapshot_array(make_array_view(*map.raw_items_array()))
+                .keys=snapshot_array(make_array_view(*map.raw_keys_array())),
+                .items=snapshot_array(make_array_view(*map.raw_items_array()))
             };
         }
 
@@ -283,7 +281,10 @@ namespace sparrow
         {
             append_range<MOVE_SOURCE>(destination_keys, source_keys, begin, end);
             append_range<MOVE_SOURCE>(destination_items, source_items, begin, end);
-            SPARROW_ASSERT_TRUE(std::in_range<std::int32_t>(destination_keys.size()));
+            if (!std::in_range<std::int32_t>(destination_keys.size()))
+            {
+                throw std::overflow_error("Map entries exceed the int32 offset range");
+            }
             destination_offsets.push_back(static_cast<std::int32_t>(destination_keys.size()));
         }
 
@@ -310,14 +311,14 @@ namespace sparrow
          * @return The rebuilt flat lists and a fresh offset buffer (starting at 0).
          */
         rebuilt_entries rebuild_flat_entries(
-            std::vector<dynamic_value>&& old_keys,
-            std::vector<dynamic_value>&& old_items,
-            map_array::offset_type* old_offsets,
+            std::vector<dynamic_value> old_keys,
+            std::vector<dynamic_value> old_items,
+            std::span<const std::int32_t> old_offsets,
             std::span<const std::size_t> old_rows,
             std::size_t inserted_at,
             std::size_t inserted_count,
-            std::vector<dynamic_value>&& inserted_keys,
-            std::vector<dynamic_value>&& inserted_items,
+            std::vector<dynamic_value> inserted_keys,
+            std::vector<dynamic_value> inserted_items,
             std::size_t inserted_entry_size
         )
         {
@@ -387,20 +388,15 @@ namespace sparrow
         {
             return std::next(value_begin(), static_cast<std::ptrdiff_t>(index));
         }
-        if (get_arrow_proxy().offset() != 0)
-        {
-            throw std::logic_error("map_array::insert_value does not support sliced arrays");
-        }
-        if (!m_keys_sorted)
-        {
-            throw std::invalid_argument("Cannot mutate a map_array with unsorted keys");
-        }
-
-        auto [old_keys, old_items] = snapshot_for_mutation(*this, m_keys_sorted, "map_array::insert_value");
+        auto [old_keys, old_items] = snapshot_for_mutation(
+            *this,
+            m_keys_sorted,
+            "map_array::insert_value does not support sliced arrays"
+        );
 
         std::vector<dynamic_value> inserted_keys;
-        std::vector<dynamic_value> inserted_items;
         inserted_keys.reserve(value.size());
+        std::vector<dynamic_value> inserted_items;
         inserted_items.reserve(value.size());
         for (const auto& entry : value)
         {
@@ -409,14 +405,10 @@ namespace sparrow
         }
 
         const size_type old_size = size();
-        const auto old_offsets = p_list_offsets;
+        const auto old_offsets = make_list_offsets();
         std::vector<std::size_t> old_rows;
         old_rows.reserve(old_size);
-        for (size_type row = 0; row < index; ++row)
-        {
-            old_rows.push_back(row);
-        }
-        for (size_type row = index; row < old_size; ++row)
+        for (size_type row = 0; row < old_size; ++row)
         {
             old_rows.push_back(row);
         }
@@ -449,7 +441,7 @@ namespace sparrow
         }
         auto [old_keys, old_items] = snapshot_for_mutation(*this, m_keys_sorted, "map_array::erase_values");
         const size_type old_size = size();
-        const auto old_offsets = p_list_offsets;
+        const auto old_offsets = make_list_offsets();
 
         std::vector<std::size_t> old_rows;
         old_rows.reserve(old_size - count);

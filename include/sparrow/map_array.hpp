@@ -14,6 +14,8 @@
 
 #pragma once
 
+#include <span>
+
 #include "sparrow/array_api.hpp"
 #include "sparrow/layout/array_bitmap_base.hpp"
 #include "sparrow/layout/array_factory.hpp"
@@ -96,6 +98,7 @@ namespace sparrow
         using size_type = typename base_type::size_type;
         using offset_type = const std::int32_t;
         using offset_buffer_type = u8_buffer<std::remove_const_t<offset_type>>;
+        using offset_span_type = std::span<const std::int32_t>;
 
         using bitmap_type = typename base_type::bitmap_type;
         using bitmap_const_reference = typename base_type::bitmap_const_reference;
@@ -314,7 +317,7 @@ namespace sparrow
          * @post Returns non-null pointer to offset data
          * @post Pointer is adjusted for any array offset
          */
-        [[nodiscard]] SPARROW_API offset_type* make_list_offsets() const;
+        [[nodiscard]] SPARROW_API offset_span_type make_list_offsets() const;
 
         /**
          * @brief Creates the entries array (struct with key/value fields).
@@ -552,10 +555,8 @@ namespace sparrow
         }
 
         static constexpr std::size_t OFFSET_BUFFER_INDEX = 1;
-        offset_type* p_list_offsets;
-
         cloning_ptr<array_wrapper> p_entries_array;
-        bool m_keys_sorted;
+        bool m_keys_sorted{};
 
         // friend classes
         friend class array_crtp_base<map_array>;
