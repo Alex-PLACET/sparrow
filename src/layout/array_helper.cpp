@@ -178,7 +178,7 @@ namespace sparrow
 
     void append_values(array& destination, std::vector<array_traits::value_type>&& values)
     {
-        for (auto& value : std::move(values))
+        for (auto& value : values)
         {
             array source = array_make_from_element(std::move(value));
             destination.insert(destination.cend(), source.cbegin(), source.cend());
