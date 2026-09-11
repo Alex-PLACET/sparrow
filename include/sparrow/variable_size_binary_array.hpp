@@ -614,10 +614,10 @@ namespace sparrow
          * @param i Index of the offset to access
          * @return Mutable pointer to offset value
          *
-         * @pre i must be <= size() + offset()
+         * @pre i must be <= size()
          * @post Returns valid pointer to offset in buffer
          *
-         * @note Internal assertion: SPARROW_ASSERT_TRUE(i <= size() + this->get_arrow_proxy().offset())
+         * @note Internal assertion: SPARROW_ASSERT_TRUE(i <= size())
          */
         [[nodiscard]] constexpr offset_iterator offset(size_type i);
 
@@ -694,10 +694,10 @@ namespace sparrow
          * @param i Index of the offset to access
          * @return Const pointer to offset value
          *
-         * @pre i must be <= size() + offset()
+         * @pre i must be <= size()
          * @post Returns valid const pointer to offset
          *
-         * @note Internal assertion: SPARROW_ASSERT_TRUE(i <= this->size() + this->get_arrow_proxy().offset())
+         * @note Internal assertion: SPARROW_ASSERT_TRUE(i <= this->size())
          */
         [[nodiscard]] constexpr const_offset_iterator offset(size_type i) const;
 
@@ -1219,7 +1219,7 @@ namespace sparrow
             // Adjust offsets for subsequent elements
             std::for_each(
                 offset(index + 1),
-                offset(size() + 1),
+                offsets_end(),
                 [shift_byte_count](auto& offset)
                 {
                     offset += shift_byte_count;
@@ -1271,7 +1271,7 @@ namespace sparrow
     template <std::ranges::sized_range T, class CR, layout_offset OT, typename Ext>
     constexpr auto variable_size_binary_array_impl<T, CR, OT, Ext>::offset(size_type i) -> offset_iterator
     {
-        SPARROW_ASSERT_TRUE(i <= size() + this->get_arrow_proxy().offset());
+        SPARROW_ASSERT_TRUE(i <= size());
         return get_arrow_proxy().buffers()[OFFSET_BUFFER_INDEX].template data<OT>()
                + static_cast<size_type>(this->get_arrow_proxy().offset()) + i;
     }
@@ -1280,7 +1280,7 @@ namespace sparrow
     constexpr auto variable_size_binary_array_impl<T, CR, OT, Ext>::offset(size_type i) const
         -> const_offset_iterator
     {
-        SPARROW_ASSERT_TRUE(i <= this->size() + this->get_arrow_proxy().offset());
+        SPARROW_ASSERT_TRUE(i <= this->size());
         return this->get_arrow_proxy().buffers()[OFFSET_BUFFER_INDEX].template data<OT>()
                + static_cast<size_type>(this->get_arrow_proxy().offset()) + i;
     }
