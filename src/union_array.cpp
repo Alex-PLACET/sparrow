@@ -121,7 +121,8 @@ namespace sparrow
                 const auto child_index = value.first;
                 payload.type_ids.push_back(child_type_ids[child_index]);
                 SPARROW_ASSERT_TRUE(
-                    payload.child_values[child_index].size() <= std::numeric_limits<std::uint32_t>::max()
+                    payload.child_values[child_index].size()
+                    <= static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max())
                 );
                 payload.offsets.push_back(static_cast<std::uint32_t>(payload.child_values[child_index].size()));
                 payload.child_values[child_index].push_back(std::move(value));
