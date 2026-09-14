@@ -16,9 +16,11 @@
 
 #include "sparrow/array.hpp"
 #include "sparrow/layout/array_registry.hpp"
+#include "sparrow/list_array.hpp"
 #include "sparrow/primitive_array.hpp"
 #include "sparrow/union_array.hpp"
 #include "sparrow/utils/nullable.hpp"
+#include "sparrow/variable_size_binary_array.hpp"
 
 #include "../test/external_array_data_creation.hpp"
 #include "doctest/doctest.h"
@@ -437,6 +439,32 @@ namespace sparrow
             }
         }
 
+        TEST_CASE("rebuilds nested and noncanonical children")
+        {
+            auto list_child = list_array(
+                array(primitive_array<std::int16_t>{std::vector<std::int16_t>{1, 2, 3}}),
+                std::vector<std::size_t>{0, 1, 3},
+                true
+            );
+            auto large_string_child = big_string_array(std::vector<std::string>{"alpha", "beta"}, true);
+
+            sparse_union_array uarr(
+                std::vector<array>{array(std::move(list_child)), array(std::move(large_string_child))},
+                sparse_union_array::type_id_buffer_type{std::vector<std::uint8_t>{0, 1}}
+            );
+
+            uarr.erase(uarr.cbegin());
+
+            const auto& proxy = detail::array_access::get_arrow_proxy(uarr);
+            CHECK_EQ(proxy.children()[0].format(), "+l");
+            CHECK_EQ(proxy.children()[1].format(), "U");
+            CHECK_EQ(proxy.children()[0].length(), 1);
+            CHECK_EQ(proxy.children()[1].length(), 1);
+            CHECK(uarr[0].has_value());
+            array large_string_result{proxy.children()[1].view()};
+            CHECK_NULLABLE_VARIANT_EQ(large_string_result[0], std::string_view("beta"));
+        }
+
 #if defined(__cpp_lib_format)
         TEST_CASE("formatting")
         {
@@ -750,6 +778,68 @@ namespace sparrow
                 CHECK_EQ(dynamic.size(), 6);
                 CHECK_NULLABLE_VARIANT_EQ(dynamic[1], float32_t(0.0f));
             }
+        }
+
+        TEST_CASE("rebuilds nested and noncanonical children")
+        {
+            auto list_child = list_array(
+                array(primitive_array<std::int16_t>{std::vector<std::int16_t>{1, 2, 3}}),
+                std::vector<std::size_t>{0, 1, 3},
+                true
+            );
+            auto large_string_child = big_string_array(std::vector<std::string>{"alpha", "beta"}, true);
+
+            dense_union_array uarr(
+                std::vector<array>{array(std::move(list_child)), array(std::move(large_string_child))},
+                dense_union_array::type_id_buffer_type{std::vector<std::uint8_t>{0, 1, 0, 1}},
+                dense_union_array::offset_buffer_type{std::vector<std::uint32_t>{0, 0, 1, 1}}
+            );
+
+            uarr.erase(uarr.cbegin() + 1);
+
+            const auto& proxy = detail::array_access::get_arrow_proxy(uarr);
+            CHECK_EQ(proxy.children()[0].format(), "+l");
+            CHECK_EQ(proxy.children()[1].format(), "U");
+            CHECK_EQ(proxy.children()[0].length(), 2);
+            CHECK_EQ(proxy.children()[1].length(), 1);
+            CHECK(uarr[0].has_value());
+            CHECK(uarr[1].has_value());
+            CHECK(uarr[2].has_value());
+            array large_string_result{proxy.children()[1].view()};
+            CHECK_NULLABLE_VARIANT_EQ(large_string_result[0], std::string_view("beta"));
+        }
+
+        TEST_CASE("preserves a nested union child during rebuild")
+        {
+            auto nested_union = dense_union_array(
+                std::vector<array>{
+                    array(primitive_array<std::int32_t>{std::vector<std::int32_t>{10}}),
+                    array(string_array{std::vector<std::string>{"inner"}})
+                },
+                dense_union_array::type_id_buffer_type{std::vector<std::uint8_t>{0, 1}},
+                dense_union_array::offset_buffer_type{std::vector<std::uint32_t>{0, 0}}
+            );
+            auto large_string_child = big_string_array(std::vector<std::string>{"alpha", "beta"}, true);
+
+            dense_union_array uarr(
+                std::vector<array>{array(std::move(nested_union)), array(std::move(large_string_child))},
+                dense_union_array::type_id_buffer_type{std::vector<std::uint8_t>{0, 1, 0, 1}},
+                dense_union_array::offset_buffer_type{std::vector<std::uint32_t>{0, 0, 1, 1}}
+            );
+
+            uarr.erase(uarr.cbegin() + 1);
+
+            const auto& proxy = detail::array_access::get_arrow_proxy(uarr);
+            CHECK_EQ(proxy.children()[0].format(), "+ud:0,1");
+            CHECK_EQ(proxy.children()[0].length(), 2);
+            CHECK_EQ(proxy.children()[1].format(), "U");
+            CHECK_EQ(proxy.children()[1].length(), 1);
+            CHECK(uarr[0].has_value());
+            CHECK(uarr[1].has_value());
+            CHECK(uarr[2].has_value());
+            array nested_union_result{proxy.children()[0].view()};
+            CHECK_NULLABLE_VARIANT_EQ(nested_union_result[0], std::int32_t(10));
+            CHECK_NULLABLE_VARIANT_EQ(nested_union_result[1], std::string_view("inner"));
         }
 
 #if defined(__cpp_lib_format)

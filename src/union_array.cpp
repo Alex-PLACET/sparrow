@@ -28,7 +28,8 @@ namespace sparrow
     namespace
     {
         using dynamic_value = array_traits::value_type;
-        using rebuild_value = std::pair<std::size_t, dynamic_value>;
+        using rebuild_value = detail::union_rebuild_value;
+        using rebuild_source = detail::union_rebuild_source;
 
         constexpr std::size_t no_child = std::numeric_limits<std::size_t>::max();
 
@@ -84,7 +85,7 @@ namespace sparrow
 
         struct union_rebuild_payload
         {
-            std::vector<std::vector<dynamic_value>> child_values;
+            std::vector<std::vector<rebuild_value>> child_values;
             std::vector<std::uint8_t> type_ids;
             std::vector<std::uint32_t> offsets;
         };
@@ -115,7 +116,7 @@ namespace sparrow
                 payload.child_values[child_index].reserve(child_value_counts[child_index]);
             }
 
-            for (auto & value : values)
+            for (auto& value : values)
             {
                 const auto child_index = value.first;
                 payload.type_ids.push_back(child_type_ids[child_index]);
@@ -123,7 +124,7 @@ namespace sparrow
                     payload.child_values[child_index].size() <= std::numeric_limits<std::uint32_t>::max()
                 );
                 payload.offsets.push_back(static_cast<std::uint32_t>(payload.child_values[child_index].size()));
-                payload.child_values[child_index].push_back(std::move(value.second));
+                payload.child_values[child_index].push_back(std::move(value));
             }
             return payload;
         }
@@ -147,29 +148,53 @@ namespace sparrow
             payload.child_values.resize(child_type_ids.size());
             payload.type_ids.reserve(values.size());
 
-            std::vector<std::optional<dynamic_value>> null_values(child_type_ids.size());
-            for (auto & value : values)
+            std::vector<std::optional<rebuild_value>> null_values(child_type_ids.size());
+            for (std::size_t child_index = 0; child_index < old_children.size(); ++child_index)
+            {
+                const auto& old_child = *old_children[child_index];
+                const auto child_size = array_size(old_child);
+                if (child_size == 0)
+                {
+                    continue;
+                }
+
+                std::size_t null_index = 0;
+                while (null_index < child_size && array_has_value(old_child, null_index))
+                {
+                    ++null_index;
+                }
+                null_values[child_index] = rebuild_value{
+                    child_index,
+                    rebuild_source{
+                        null_index == child_size ? std::size_t{0} : null_index,
+                        null_index == child_size
+                    }
+                };
+            }
+            for (auto& value : values)
             {
                 const auto child_index = value.first;
                 payload.type_ids.push_back(child_type_ids[child_index]);
                 if (!null_values[child_index].has_value())
                 {
-                    null_values[child_index] = make_null_like(value.second);
+                    if (const auto* inserted_value = std::get_if<dynamic_value>(&value.second))
+                    {
+                        null_values[child_index] = rebuild_value{
+                            child_index,
+                            make_null_like(*inserted_value)
+                        };
+                    }
                 }
             }
 
             for (std::size_t child_index = 0; child_index < child_type_ids.size(); ++child_index)
             {
-                if (!null_values[child_index].has_value() && child_index < old_children.size()
-                    && array_size(*old_children[child_index]) != 0)
-                {
-                    null_values[child_index] = make_null_like(
-                        array_materialize_element(array_element(*old_children[child_index], 0))
-                    );
-                }
                 if (!null_values[child_index].has_value() && child_index < old_children.size())
                 {
-                    null_values[child_index] = make_null_value(*old_children[child_index]);
+                    null_values[child_index] = rebuild_value{
+                        child_index,
+                        make_null_value(*old_children[child_index])
+                    };
                 }
                 SPARROW_ASSERT_TRUE(null_values[child_index].has_value() || values.empty());
 
@@ -178,7 +203,7 @@ namespace sparrow
                 {
                     if (values[row].first == child_index)
                     {
-                        payload.child_values[child_index].push_back(std::move(values[row].second));
+                        payload.child_values[child_index].push_back(std::move(values[row]));
                     }
                     else
                     {
@@ -243,7 +268,7 @@ namespace sparrow
 
     std::size_t dense_union_array::element_offset(std::size_t i) const
     {
-        return static_cast<std::size_t>(p_offsets[i]) + m_proxy.offset();
+        return static_cast<std::size_t>(p_offsets[i + m_proxy.offset()]);
     }
 
     /*************************************
@@ -374,7 +399,7 @@ namespace sparrow
                                    {
                                        return rebuild_value{
                                            m_type_id_map[p_type_ids[i]],
-                                           array_materialize_element((*this)[i])
+                                           rebuild_source{this->derived_cast().element_offset(i), false}
                                        };
                                    }
                                );
@@ -382,9 +407,41 @@ namespace sparrow
         return rebuild_values(std::move(values), first);
     }
 
+    template <typename CHILDREN>
+    void append_rebuild_value(array& destination, rebuild_value& value, const CHILDREN& old_children)
+    {
+        std::visit(
+            [&destination, &value, &old_children](auto& source)
+            {
+                using source_type = std::remove_cvref_t<decltype(source)>;
+                if constexpr (std::same_as<source_type, rebuild_source>)
+                {
+                    const auto& old_child = *old_children[value.first];
+                    const array child_view{old_child.get_arrow_proxy().view()};
+                    array source_array = child_view.slice(source.index, source.index + 1);
+                    if (source.force_null)
+                    {
+                        auto& source_proxy = detail::array_access::get_arrow_proxy(source_array);
+                        auto& bitmap = source_proxy.bitmap();
+                        SPARROW_ASSERT_TRUE(bitmap.has_value());
+                        *bitmap->begin() = false;
+                        source_proxy.set_null_count(1);
+                    }
+                    destination.insert(destination.cend(), source_array.cbegin(), source_array.cend());
+                }
+                else
+                {
+                    array source_array = array_make_from_element(std::move(source));
+                    destination.insert(destination.cend(), source_array.cbegin(), source_array.cend());
+                }
+            },
+            value.second
+        );
+    }
+
     template <class DERIVED>
     auto union_array_crtp_base<DERIVED>::rebuild_values(
-        std::vector<std::pair<size_type, dynamic_value>> values,
+        std::vector<rebuild_value> values,
         size_type return_index
     ) -> iterator
     {
@@ -442,7 +499,9 @@ namespace sparrow
         {
             if (value.first == no_child)
             {
-                value.first = resolve_child_index(value.second);
+                const auto* inserted_value = std::get_if<dynamic_value>(&value.second);
+                SPARROW_ASSERT_TRUE(inserted_value != nullptr);
+                value.first = resolve_child_index(*inserted_value);
             }
         }
 
@@ -482,7 +541,10 @@ namespace sparrow
             else
             {
                 child.erase(child.cbegin(), child.cend());
-                append_values(child, values_for_child);
+                for (auto& value : values_for_child)
+                {
+                    append_rebuild_value(child, value, m_children);
+                }
             }
             new_children.push_back(std::move(child));
         }
@@ -543,7 +605,7 @@ namespace sparrow
     template SPARROW_API auto union_array_crtp_base<TYPE>::erase_values(size_type, size_type)             \
         -> iterator;                                                                                      \
     template SPARROW_API auto union_array_crtp_base<TYPE>::rebuild_values(                                \
-        std::vector<std::pair<size_type, array_traits::value_type>>,                                      \
+        std::vector<detail::union_rebuild_value>,                                                        \
         size_type                                                                                         \
     ) -> iterator;                                                                                        \
     template SPARROW_API void union_array_crtp_base<TYPE>::push_back(const_reference);                    \

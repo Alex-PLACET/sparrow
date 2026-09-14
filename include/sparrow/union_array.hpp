@@ -25,6 +25,7 @@
 #include <span>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "sparrow/array_api.hpp"
@@ -68,6 +69,16 @@ namespace sparrow
                 return sparrow::data_type::SPARSE_UNION;
             }
         };
+
+        struct union_rebuild_source
+        {
+            std::size_t index;
+            bool force_null;
+        };
+
+        using union_rebuild_value = std::pair<
+            std::size_t,
+            std::variant<union_rebuild_source, array_traits::value_type>>;
     }
 
     /**
@@ -616,7 +627,7 @@ namespace sparrow
             }
 
             const auto old_size = size();
-            using rebuild_value = std::pair<size_type, array_traits::value_type>;
+            using rebuild_value = detail::union_rebuild_value;
             const auto value_count = static_cast<size_type>(std::ranges::distance(values));
             std::vector<rebuild_value> entries;
             entries.reserve(old_size + value_count * count);
@@ -627,7 +638,10 @@ namespace sparrow
                                   {
                                       return rebuild_value{
                                           m_type_id_map[p_type_ids[i]],
-                                          array_materialize_element((*this)[i])
+                                          detail::union_rebuild_source{
+                                              this->derived_cast().element_offset(i),
+                                              false
+                                          }
                                       };
                                   }
                               );
@@ -642,7 +656,10 @@ namespace sparrow
                                    | std::views::transform(
                                        [](const array_traits::value_type& value) -> rebuild_value
                                        {
-                                           return rebuild_value{std::numeric_limits<size_type>::max(), value};
+                                           return rebuild_value{
+                                               std::numeric_limits<size_type>::max(),
+                                               value
+                                           };
                                        }
                                    );
 
@@ -655,7 +672,7 @@ namespace sparrow
         SPARROW_API iterator erase_values(size_type first, size_type count);
 
         SPARROW_API iterator rebuild_values(
-            std::vector<std::pair<size_type, array_traits::value_type>> values,
+            std::vector<detail::union_rebuild_value> values,
             size_type return_index
         );
 
@@ -1296,7 +1313,7 @@ namespace sparrow
     template <class DERIVED>
     SPARROW_CONSTEXPR_CLANG auto union_array_crtp_base<DERIVED>::operator[](std::size_t i) const -> value_type
     {
-        const auto type_id = static_cast<std::size_t>(p_type_ids[i]);
+        const auto type_id = static_cast<std::size_t>(p_type_ids[i + m_proxy.offset()]);
         const auto child_index = m_type_id_map[type_id];
         const auto offset = this->derived_cast().element_offset(i);
         return array_element(*m_children[child_index], static_cast<std::size_t>(offset));
