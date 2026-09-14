@@ -15,9 +15,11 @@
 #include <optional>
 
 #include "sparrow/array.hpp"
+#include "sparrow/decimal_array.hpp"
 #include "sparrow/layout/array_registry.hpp"
 #include "sparrow/list_array.hpp"
 #include "sparrow/primitive_array.hpp"
+#include "sparrow/timestamp_array.hpp"
 #include "sparrow/union_array.hpp"
 #include "sparrow/utils/nullable.hpp"
 #include "sparrow/variable_size_binary_array.hpp"
@@ -840,6 +842,58 @@ namespace sparrow
             array nested_union_result{proxy.children()[0].view()};
             CHECK_NULLABLE_VARIANT_EQ(nested_union_result[0], std::int32_t(10));
             CHECK_NULLABLE_VARIANT_EQ(nested_union_result[1], std::string_view("inner"));
+        }
+
+        TEST_CASE("distinguishes parameterized child schemas")
+        {
+            dense_union_array decimal_union(
+                std::vector<array>{
+                    array(decimal_64_array{std::vector<std::int64_t>{100}, std::size_t{18}, 2})
+                },
+                dense_union_array::type_id_buffer_type{std::vector<std::uint8_t>{0}},
+                dense_union_array::offset_buffer_type{std::vector<std::uint32_t>{0}}
+            );
+            std::vector<array_traits::value_type> decimal_values{
+                make_nullable(decimal<std::int64_t>{123, 3}),
+                make_nullable(decimal<std::int64_t>{456, 4})
+            };
+
+            decimal_union.insert(decimal_union.cend(), decimal_values.cbegin(), decimal_values.cend());
+
+            const auto& decimal_proxy = detail::array_access::get_arrow_proxy(decimal_union);
+            REQUIRE_EQ(decimal_proxy.children().size(), 3);
+            CHECK_EQ(decimal_proxy.children()[0].format(), "d:18,2,64");
+            CHECK_EQ(decimal_proxy.children()[1].format(), "d:18,3,64");
+            CHECK_EQ(decimal_proxy.children()[2].format(), "d:18,4,64");
+
+            const auto* new_york = date::locate_zone("America/New_York");
+            const auto* utc = date::locate_zone("UTC");
+            const auto* los_angeles = date::locate_zone("America/Los_Angeles");
+            dense_union_array timestamp_union(
+                std::vector<array>{
+                    array(timestamp_seconds_array{
+                        new_york,
+                        std::vector<timestamp_second>{
+                            timestamp_second{new_york, date::sys_seconds{std::chrono::seconds{0}}}
+                        }
+                    })
+                },
+                dense_union_array::type_id_buffer_type{std::vector<std::uint8_t>{0}},
+                dense_union_array::offset_buffer_type{std::vector<std::uint32_t>{0}}
+            );
+            std::vector<array_traits::value_type> timestamp_values{
+                make_nullable(timestamp_second{utc, date::sys_seconds{std::chrono::seconds{1}}}),
+                make_nullable(timestamp_second{los_angeles, date::sys_seconds{std::chrono::seconds{2}}})
+            };
+
+            timestamp_union.insert(timestamp_union.cend(), timestamp_values.cbegin(), timestamp_values.cend());
+
+            const auto& timestamp_proxy = detail::array_access::get_arrow_proxy(timestamp_union);
+            REQUIRE_EQ(timestamp_proxy.children().size(), 3);
+            CHECK(timestamp_proxy.children()[0].format() != timestamp_proxy.children()[1].format());
+            CHECK(timestamp_proxy.children()[1].format() != timestamp_proxy.children()[2].format());
+            CHECK(timestamp_proxy.children()[1].format().find("UTC") != std::string_view::npos);
+            CHECK(timestamp_proxy.children()[2].format().find("America/Los_Angeles") != std::string_view::npos);
         }
 
 #if defined(__cpp_lib_format)

@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <iterator>
 #include <limits>
+#include <string>
 #include <vector>
 
 #include "sparrow/array.hpp"
@@ -451,37 +452,66 @@ namespace sparrow
         std::vector<array> child_templates(old_child_count);
         std::vector<std::uint8_t> child_type_ids = m_child_type_ids;
         std::array<bool, TYPE_ID_MAP_SIZE> used_type_ids{};
-        std::vector<data_type> child_data_types;
-        child_data_types.reserve(old_child_count);
+        struct child_schema
+        {
+            child_schema(data_type type_, std::string format_)
+                : type(type_)
+                , format(std::move(format_))
+            {
+            }
+
+            data_type type;
+            std::string format;
+        };
+
+        std::vector<child_schema> child_schemas;
+        child_schemas.reserve(old_child_count);
         for (std::size_t child_index = 0; child_index < old_child_count; ++child_index)
         {
             used_type_ids[child_type_ids[child_index]] = true;
-            child_data_types.push_back(m_children[child_index]->data_type());
+            child_schemas.emplace_back(
+                m_children[child_index]->data_type(),
+                std::string(m_children[child_index]->get_arrow_proxy().format())
+            );
         }
 
-        std::array<size_type, std::variant_size_v<typename dynamic_value::base_type>> value_type_to_child{};
-        value_type_to_child.fill(no_child);
-        // Resolves the child index for a value whose child is not fixed yet
-        // (value.first == no_child): reuses the child with the same data type when
-        // possible, otherwise registers a new child with a fresh type ID.
+        std::vector<std::pair<child_schema, size_type>> value_schema_to_child;
         auto resolve_child_index = [&](const dynamic_value& value) -> size_type
         {
-            auto& cached_child_index = value_type_to_child[value.index()];
-            if (cached_child_index != no_child)
-            {
-                return cached_child_index;
-            }
-
             auto child = array_make_from_element(value);
-            const auto child_type = child.data_type();
-            const auto existing = std::find(child_data_types.begin(), child_data_types.end(), child_type);
-            if (existing != child_data_types.end())
+            child_schema schema{
+                child.data_type(),
+                std::string(detail::array_access::get_arrow_proxy(child).format())
+            };
+            const auto cached = std::find_if(
+                value_schema_to_child.begin(),
+                value_schema_to_child.end(),
+                [&schema](const auto& entry)
+                {
+                    return entry.first.type == schema.type && entry.first.format == schema.format;
+                }
+            );
+            if (cached != value_schema_to_child.end())
             {
-                cached_child_index = static_cast<size_type>(existing - child_data_types.begin());
-                return cached_child_index;
+                return cached->second;
             }
 
-            SPARROW_ASSERT_TRUE(child_data_types.size() < 256);
+            const auto existing = std::find_if(
+                child_schemas.begin(),
+                child_schemas.end(),
+                [&schema](const child_schema& existing_schema)
+                {
+                    return existing_schema.type == schema.type && existing_schema.format == schema.format;
+                }
+            );
+            if (existing != child_schemas.end())
+            {
+                const auto child_index = static_cast<size_type>(existing - child_schemas.begin());
+                value_schema_to_child.emplace_back(std::move(schema), child_index);
+                return child_index;
+            }
+
+            SPARROW_ASSERT_TRUE(child_schemas.size() < 256);
             std::size_t type_id = 0;
             while (type_id < TYPE_ID_MAP_SIZE && used_type_ids[type_id])
             {
@@ -489,11 +519,12 @@ namespace sparrow
             }
             SPARROW_ASSERT_TRUE(type_id < TYPE_ID_MAP_SIZE);
             used_type_ids[type_id] = true;
-            cached_child_index = child_data_types.size();
-            child_data_types.push_back(child_type);
+            const auto child_index = child_schemas.size();
+            child_schemas.push_back(std::move(schema));
             child_type_ids.push_back(static_cast<std::uint8_t>(type_id));
             child_templates.push_back(std::move(child));
-            return cached_child_index;
+            value_schema_to_child.emplace_back(child_schemas.back(), child_index);
+            return child_index;
         };
 
         for (auto& value : values)
@@ -523,8 +554,8 @@ namespace sparrow
         }();
 
         std::vector<array> new_children;
-        new_children.reserve(child_data_types.size());
-        for (std::size_t child_index = 0; child_index < child_data_types.size(); ++child_index)
+        new_children.reserve(child_schemas.size());
+        for (std::size_t child_index = 0; child_index < child_schemas.size(); ++child_index)
         {
             array child = child_index < old_child_count
                               ? make_empty_child(*m_children[child_index])
