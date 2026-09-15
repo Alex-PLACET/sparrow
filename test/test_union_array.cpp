@@ -445,7 +445,7 @@ namespace sparrow
         {
             auto list_child = list_array(
                 array(primitive_array<std::int16_t>{std::vector<std::int16_t>{1, 2, 3}}),
-                std::vector<std::size_t>{0, 1, 3},
+                std::vector<std::int32_t>{0, 1, 3},
                 true
             );
             auto large_string_child = big_string_array(std::vector<std::string>{"alpha", "beta"}, true);
@@ -786,7 +786,7 @@ namespace sparrow
         {
             auto list_child = list_array(
                 array(primitive_array<std::int16_t>{std::vector<std::int16_t>{1, 2, 3}}),
-                std::vector<std::size_t>{0, 1, 3},
+                std::vector<std::int32_t>{0, 1, 3},
                 true
             );
             auto large_string_child = big_string_array(std::vector<std::string>{"alpha", "beta"}, true);
