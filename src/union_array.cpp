@@ -32,8 +32,6 @@ namespace sparrow
         using rebuild_value = detail::union_rebuild_value;
         using rebuild_source = detail::union_rebuild_source;
 
-        constexpr std::size_t no_child = std::numeric_limits<std::size_t>::max();
-
         array make_empty_child(const array_wrapper& child)
         {
             const array view{child.get_arrow_proxy().view()};
@@ -389,56 +387,42 @@ namespace sparrow
 
         std::vector<rebuild_value> values;
         values.reserve(current_size - count);
-        auto retained_values = std::views::iota(size_type{0}, current_size)
-                               | std::views::filter(
-                                   [first, count](size_type i)
-                                   {
-                                       return i < first || i >= first + count;
-                                   }
-                               )
-                               | std::views::transform(
-                                   [this](size_type i) -> rebuild_value
-                                   {
-                                       return rebuild_value{
-                                           m_type_id_map[p_type_ids[i]],
-                                           rebuild_source{this->derived_cast().element_offset(i), false}
-                                       };
-                                   }
-                               );
-        std::ranges::copy(retained_values, std::back_inserter(values));
+        this->append_rebuild_entries(values, 0, first);
+        this->append_rebuild_entries(values, first + count, current_size);
         return rebuild_values(std::move(values), first);
     }
 
     template <typename CHILDREN>
     void append_rebuild_value(array& destination, rebuild_value& value, const CHILDREN& old_children)
     {
-        std::visit(
-            [&destination, &value, &old_children](auto& source)
+        const auto child_index = value.first;
+        array source = std::visit(
+            [&old_children, child_index](auto& source) -> array
             {
                 using source_type = std::remove_cvref_t<decltype(source)>;
                 if constexpr (std::same_as<source_type, rebuild_source>)
                 {
-                    const auto& old_child = *old_children[value.first];
+                    const auto& old_child = *old_children[child_index];
                     const array child_view{old_child.get_arrow_proxy().view()};
-                    array source_array = child_view.slice(source.index, source.index + 1);
+                    array source_slice = child_view.slice(source.index, source.index + 1);
                     if (source.force_null)
                     {
-                        auto& source_proxy = detail::array_access::get_arrow_proxy(source_array);
+                        auto& source_proxy = detail::array_access::get_arrow_proxy(source_slice);
                         auto& bitmap = source_proxy.bitmap();
                         SPARROW_ASSERT_TRUE(bitmap.has_value());
                         *bitmap->begin() = false;
                         source_proxy.set_null_count(1);
                     }
-                    destination.insert(destination.cend(), source_array.cbegin(), source_array.cend());
+                    return source_slice;
                 }
                 else
                 {
-                    array source_array = array_make_from_element(std::move(source));
-                    destination.insert(destination.cend(), source_array.cbegin(), source_array.cend());
+                    return array_make_from_element(std::move(source));
                 }
             },
             value.second
         );
+        destination.insert(destination.cend(), source.cbegin(), source.cend());
     }
 
     template <class DERIVED>
@@ -449,19 +433,15 @@ namespace sparrow
     {
         const auto old_child_count = m_children.size();
         SPARROW_ASSERT_TRUE(m_child_type_ids.size() == old_child_count);
-        std::vector<array> child_templates(old_child_count);
         std::vector<std::uint8_t> child_type_ids = m_child_type_ids;
         std::array<bool, TYPE_ID_MAP_SIZE> used_type_ids{};
+
         struct child_schema
         {
-            child_schema(data_type type_, std::string format_)
-                : type(type_)
-                , format(std::move(format_))
-            {
-            }
-
             data_type type;
             std::string format;
+
+            [[nodiscard]] bool operator==(const child_schema& other) const = default;
         };
 
         std::vector<child_schema> child_schemas;
@@ -475,43 +455,24 @@ namespace sparrow
             );
         }
 
-        std::vector<std::pair<child_schema, size_type>> value_schema_to_child;
+        // Prototypes of the children created for the inserted values, indexed by
+        // child_index - old_child_count.
+        std::vector<array> new_child_templates;
+
         auto resolve_child_index = [&](const dynamic_value& value) -> size_type
         {
             auto child = array_make_from_element(value);
-            child_schema schema{
+            const child_schema schema{
                 child.data_type(),
                 std::string(detail::array_access::get_arrow_proxy(child).format())
             };
-            const auto cached = std::find_if(
-                value_schema_to_child.begin(),
-                value_schema_to_child.end(),
-                [&schema](const auto& entry)
-                {
-                    return entry.first.type == schema.type && entry.first.format == schema.format;
-                }
-            );
-            if (cached != value_schema_to_child.end())
-            {
-                return cached->second;
-            }
-
-            const auto existing = std::find_if(
-                child_schemas.begin(),
-                child_schemas.end(),
-                [&schema](const child_schema& existing_schema)
-                {
-                    return existing_schema.type == schema.type && existing_schema.format == schema.format;
-                }
-            );
+            const auto existing = std::ranges::find(child_schemas, schema);
             if (existing != child_schemas.end())
             {
-                const auto child_index = static_cast<size_type>(existing - child_schemas.begin());
-                value_schema_to_child.emplace_back(std::move(schema), child_index);
-                return child_index;
+                return static_cast<size_type>(existing - child_schemas.begin());
             }
 
-            SPARROW_ASSERT_TRUE(child_schemas.size() < 256);
+            SPARROW_ASSERT_TRUE(child_schemas.size() < TYPE_ID_MAP_SIZE);
             std::size_t type_id = 0;
             while (type_id < TYPE_ID_MAP_SIZE && used_type_ids[type_id])
             {
@@ -519,17 +480,17 @@ namespace sparrow
             }
             SPARROW_ASSERT_TRUE(type_id < TYPE_ID_MAP_SIZE);
             used_type_ids[type_id] = true;
+
             const auto child_index = child_schemas.size();
-            child_schemas.push_back(std::move(schema));
+            child_schemas.push_back(schema);
             child_type_ids.push_back(static_cast<std::uint8_t>(type_id));
-            child_templates.push_back(std::move(child));
-            value_schema_to_child.emplace_back(child_schemas.back(), child_index);
+            new_child_templates.push_back(std::move(child));
             return child_index;
         };
 
         for (auto& value : values)
         {
-            if (value.first == no_child)
+            if (value.first == detail::union_no_child)
             {
                 const auto* inserted_value = std::get_if<dynamic_value>(&value.second);
                 SPARROW_ASSERT_TRUE(inserted_value != nullptr);
@@ -559,7 +520,7 @@ namespace sparrow
         {
             array child = child_index < old_child_count
                               ? make_empty_child(*m_children[child_index])
-                              : std::move(child_templates[child_index]);
+                              : std::move(new_child_templates[child_index - old_child_count]);
             auto& values_for_child = payload.child_values[child_index];
             if (child.data_type() == data_type::NA)
             {

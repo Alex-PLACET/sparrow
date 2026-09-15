@@ -79,6 +79,8 @@ namespace sparrow
         using union_rebuild_value = std::pair<
             std::size_t,
             std::variant<union_rebuild_source, array_traits::value_type>>;
+
+        inline constexpr std::size_t union_no_child = std::numeric_limits<std::size_t>::max();
     }
 
     /**
@@ -614,58 +616,53 @@ namespace sparrow
             }
         }
 
+        /**
+         * @brief Appends one rebuild entry per element in [from, to), each referring to its
+         *        current child slot.
+         *
+         * @note Member template on purpose: non-template members of this class are instantiated
+         *       in union_array.cpp only (see the extern template declarations below), so a
+         *       header-only helper must be a template to be instantiated on demand.
+         */
+        template <class ENTRIES>
+        void append_rebuild_entries(ENTRIES& entries, size_type from, size_type to) const
+        {
+            for (size_type index = from; index < to; ++index)
+            {
+                entries.push_back(detail::union_rebuild_value{
+                    m_type_id_map[p_type_ids[index]],
+                    detail::union_rebuild_source{this->derived_cast().element_offset(index), false}
+                });
+            }
+        }
+
         template <std::ranges::forward_range R>
             requires std::same_as<std::ranges::range_value_t<R>, array_traits::value_type>
         iterator insert_materialized(const_iterator pos, R&& values, size_type count)
         {
-            SPARROW_ASSERT_TRUE(m_proxy.offset() == 0);
             const auto pos_index = static_cast<size_type>(pos - cbegin());
-            SPARROW_ASSERT_TRUE(pos_index <= size());
             if (count == 0 || std::ranges::empty(values))
             {
                 return iterator(functor_type{&this->derived_cast()}, pos_index);
             }
 
+            SPARROW_ASSERT_TRUE(m_proxy.offset() == 0);
+            SPARROW_ASSERT_TRUE(pos_index <= size());
+
             const auto old_size = size();
-            using rebuild_value = detail::union_rebuild_value;
             const auto value_count = static_cast<size_type>(std::ranges::distance(values));
-            std::vector<rebuild_value> entries;
+            std::vector<detail::union_rebuild_value> entries;
             entries.reserve(old_size + value_count * count);
 
-            auto old_values = std::views::iota(size_type{0}, old_size)
-                              | std::views::transform(
-                                  [this](size_type i) -> rebuild_value
-                                  {
-                                      return rebuild_value{
-                                          m_type_id_map[p_type_ids[i]],
-                                          detail::union_rebuild_source{
-                                              this->derived_cast().element_offset(i),
-                                              false
-                                          }
-                                      };
-                                  }
-                              );
-            auto repeated_values = std::views::iota(size_type{0}, count)
-                                   | std::views::transform(
-                                       [&values](size_type)
-                                       {
-                                           return std::views::all(values);
-                                       }
-                                   )
-                                   | std::views::join
-                                   | std::views::transform(
-                                       [](const array_traits::value_type& value) -> rebuild_value
-                                       {
-                                           return rebuild_value{
-                                               std::numeric_limits<size_type>::max(),
-                                               value
-                                           };
-                                       }
-                                   );
-
-            std::ranges::copy(old_values | std::views::take(pos_index), std::back_inserter(entries));
-            std::ranges::copy(repeated_values, std::back_inserter(entries));
-            std::ranges::copy(old_values | std::views::drop(pos_index), std::back_inserter(entries));
+            append_rebuild_entries(entries, 0, pos_index);
+            for (size_type repetition = 0; repetition < count; ++repetition)
+            {
+                for (const auto& value : values)
+                {
+                    entries.emplace_back(detail::union_no_child, value);
+                }
+            }
+            append_rebuild_entries(entries, pos_index, old_size);
             return rebuild_values(std::move(entries), pos_index);
         }
 
