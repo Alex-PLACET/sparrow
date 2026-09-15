@@ -392,37 +392,97 @@ namespace sparrow
         return rebuild_values(std::move(values), first);
     }
 
-    template <typename CHILDREN>
-    void append_rebuild_value(array& destination, rebuild_value& value, const CHILDREN& old_children)
+    /**
+     * @brief Slices the row a filler rebuild value refers to, marked as null.
+     *
+     * Bitmap-less children (e.g. a nested union) cannot hold a null in a single row: the row
+     * keeps its value, sparse-union filler rows being unspecified by the Arrow format.
+     */
+    array make_filler_row(const array& old_child_view, std::size_t row)
     {
-        const auto child_index = value.first;
-        array source = std::visit(
-            [&old_children, child_index](auto& source) -> array
+        array filler = old_child_view.slice(row, row + 1);
+        auto& proxy = detail::array_access::get_arrow_proxy(filler);
+        if (auto& bitmap = proxy.bitmap(); bitmap.has_value())
+        {
+            *bitmap->begin() = false;
+            proxy.set_null_count(1);
+        }
+        return filler;
+    }
+
+    /**
+     * @brief Appends @p count consecutive rows of an old child, in a single insertion.
+     *
+     * The slice is borrowed: the old child outlives the insertion (the children wrappers are
+     * only rebuilt once the new proxy is in place), and a deep copy per insertion is what made
+     * the rebuild quadratic in the child size.
+     */
+    void append_old_child_values(array& destination, const array& old_child_view, std::size_t first_row, std::size_t count)
+    {
+        const array rows = old_child_view.slice_view(first_row, first_row + count);
+        destination.insert(destination.cend(), rows.cbegin(), rows.cend());
+    }
+
+    /**
+     * @brief Appends the rebuild values of one child to @p destination.
+     *
+     * Values reading consecutive rows of the same old child are appended with a single range
+     * insertion, and filler rows with a single repeated insertion of one shared row. Appending
+     * value by value slices the old child once per value and rebuilds nested unions once per
+     * value, which is quadratic.
+     */
+    template <typename CHILDREN>
+    void append_rebuild_values(array& destination, std::vector<rebuild_value>& values, const CHILDREN& old_children)
+    {
+        // View over the old child the values are read from, built once per child.
+        std::optional<array> old_child_view;
+        // Every filler row of a child refers to the same old child row: slice it once.
+        std::optional<array> filler_row;
+
+        for (std::size_t index = 0; index < values.size();)
+        {
+            const auto* source = std::get_if<rebuild_source>(&values[index].second);
+            if (source == nullptr)
             {
-                using source_type = std::remove_cvref_t<decltype(source)>;
-                if constexpr (std::same_as<source_type, rebuild_source>)
+                array inserted = array_make_from_element(std::move(std::get<dynamic_value>(values[index].second)));
+                destination.insert(destination.cend(), inserted.cbegin(), inserted.cend());
+                ++index;
+                continue;
+            }
+
+            std::size_t count = 1;
+            while (index + count < values.size())
+            {
+                const auto* next = std::get_if<rebuild_source>(&values[index + count].second);
+                if (next == nullptr || values[index + count].first != values[index].first
+                    || next->force_null != source->force_null
+                    || (source->force_null ? next->index != source->index
+                                           : next->index != source->index + count))
                 {
-                    const auto& old_child = *old_children[child_index];
-                    const array child_view{old_child.get_arrow_proxy().view()};
-                    array source_slice = child_view.slice(source.index, source.index + 1);
-                    if (source.force_null)
-                    {
-                        auto& source_proxy = detail::array_access::get_arrow_proxy(source_slice);
-                        auto& bitmap = source_proxy.bitmap();
-                        SPARROW_ASSERT_TRUE(bitmap.has_value());
-                        *bitmap->begin() = false;
-                        source_proxy.set_null_count(1);
-                    }
-                    return source_slice;
+                    break;
                 }
-                else
+                ++count;
+            }
+
+            if (!old_child_view.has_value())
+            {
+                old_child_view = array{old_children[values[index].first]->get_arrow_proxy().view()};
+            }
+
+            if (source->force_null)
+            {
+                if (!filler_row.has_value())
                 {
-                    return array_make_from_element(std::move(source));
+                    filler_row = make_filler_row(*old_child_view, source->index);
                 }
-            },
-            value.second
-        );
-        destination.insert(destination.cend(), source.cbegin(), source.cend());
+                destination.insert(destination.cend(), filler_row->cbegin(), filler_row->cend(), count);
+            }
+            else
+            {
+                append_old_child_values(destination, *old_child_view, source->index, count);
+            }
+            index += count;
+        }
     }
 
     template <class DERIVED>
@@ -534,10 +594,7 @@ namespace sparrow
             else
             {
                 child.erase(child.cbegin(), child.cend());
-                for (auto& value : values_for_child)
-                {
-                    append_rebuild_value(child, value, m_children);
-                }
+                append_rebuild_values(child, values_for_child, m_children);
             }
             new_children.push_back(std::move(child));
         }

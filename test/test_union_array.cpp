@@ -439,6 +439,33 @@ namespace sparrow
                 CHECK_EQ(detail::array_access::get_arrow_proxy(uarr).format(), "+us:0,1,2");
                 CHECK_NULLABLE_VARIANT_EQ(uarr[0], float32_t(1.0f));
             }
+
+            SUBCASE("rebuilds a bitmap-less nested union child")
+            {
+                auto nested = dense_union_array(
+                    std::vector<array>{
+                        array(primitive_array<std::int32_t>{std::vector<std::int32_t>{10}}),
+                        array(string_array{std::vector<std::string>{"inner"}})
+                    },
+                    dense_union_array::type_id_buffer_type{std::vector<std::uint8_t>{0, 1}},
+                    dense_union_array::offset_buffer_type{std::vector<std::uint32_t>{0, 0}}
+                );
+                sparse_union_array uarr(
+                    std::vector<array>{
+                        array(std::move(nested)),
+                        array(primitive_array<std::int32_t>{std::vector<std::int32_t>{1, 2}})
+                    },
+                    sparse_union_array::type_id_buffer_type{std::vector<std::uint8_t>{0, 1}}
+                );
+
+                uarr.erase(uarr.cbegin());
+
+                const auto& proxy = detail::array_access::get_arrow_proxy(uarr);
+                REQUIRE_EQ(uarr.size(), 1);
+                CHECK_NULLABLE_VARIANT_EQ(uarr[0], std::int32_t(2));
+                CHECK_EQ(proxy.children()[0].length(), 1);
+                CHECK_EQ(proxy.children()[0].format(), "+ud:0,1");
+            }
         }
 
         TEST_CASE("rebuilds nested and noncanonical children")
