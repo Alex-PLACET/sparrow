@@ -373,14 +373,14 @@ namespace sparrow
          *
          * @return Iterator to the first inserted value.
          */
-        SPARROW_API iterator insert(const_iterator pos, const_reference value, size_type count = 1);
+        iterator insert(const_iterator pos, const_reference value, size_type count = 1);
 
         /**
          * @brief Inserts copies of an owned value before `pos`.
          * @return Iterator to the first inserted value.
          * @note Same complexity and offset requirement as the other insert overload.
          */
-        SPARROW_API iterator
+        iterator
         insert(const_iterator pos, const array_traits::value_type& value, size_type count = 1);
 
         /**
@@ -440,45 +440,45 @@ namespace sparrow
          * @return Iterator following the erased value.
          * @note Complexity is O(N) for dense unions and O(N*C) for sparse unions; requires offset zero.
          */
-        SPARROW_API iterator erase(const_iterator pos);
+        iterator erase(const_iterator pos);
 
         /**
          * @brief Erases the half-open range [`first`, `last`).
          * @return Iterator following the erased range.
          * @note Complexity is O(N) for dense unions and O(N*C) for sparse unions; requires offset zero.
          */
-        SPARROW_API iterator erase(const_iterator first, const_iterator last);
+        iterator erase(const_iterator first, const_iterator last);
 
         /**
          * @brief Appends a borrowed value.
          * @note Equivalent to inserting before `end()`; complexity is O(N) dense or O(N*C) sparse.
          */
-        SPARROW_API void push_back(const_reference value);
+        void push_back(const_reference value);
 
         /**
          * @brief Appends an owned value.
          * @note Equivalent to inserting before `end()`; complexity is O(N) dense or O(N*C) sparse.
          */
-        SPARROW_API void push_back(const array_traits::value_type& value);
+        void push_back(const array_traits::value_type& value);
 
         /**
          * @brief Resizes the array, default-inserting any appended values.
          * @note Complexity is O(N) dense or O(N*C) sparse when the length changes;
          *       no-op is O(1) and mutations require offset zero.
          */
-        SPARROW_API void resize(size_type new_length);
+        void resize(size_type new_length);
 
         /**
          * @brief Resizes the array, inserting `value` when it grows.
          * @note Complexity is O(N) dense or O(N*C) sparse when the length changes; requires offset zero.
          */
-        SPARROW_API void resize(size_type new_length, const_reference value);
+        void resize(size_type new_length, const_reference value);
 
         /**
          * @brief Resizes the array, inserting `value` when it grows.
          * @note Complexity is O(N) dense or O(N*C) sparse when the length changes; requires offset zero.
          */
-        SPARROW_API void resize(size_type new_length, const array_traits::value_type& value);
+        void resize(size_type new_length, const array_traits::value_type& value);
 
         /**
          * @brief Replaces stored values at null positions.
@@ -619,13 +619,12 @@ namespace sparrow
         /**
          * @brief Appends one rebuild entry per element in [from, to), each referring to its
          *        current child slot.
-         *
-         * @note Member template on purpose: non-template members of this class are instantiated
-         *       in union_array.cpp only (see the extern template declarations below), so a
-         *       header-only helper must be a template to be instantiated on demand.
          */
-        template <class ENTRIES>
-        void append_rebuild_entries(ENTRIES& entries, size_type from, size_type to) const
+        void append_rebuild_entries(
+            std::vector<detail::union_rebuild_value>& entries,
+            size_type from,
+            size_type to
+        ) const
         {
             for (size_type index = from; index < to; ++index)
             {
@@ -663,15 +662,13 @@ namespace sparrow
                 }
             }
             append_rebuild_entries(entries, pos_index, old_size);
-            return rebuild_values(std::move(entries), pos_index);
+            return this->derived_cast().rebuild_in_place(std::move(entries), pos_index);
         }
 
-        SPARROW_API iterator erase_values(size_type first, size_type count);
+        iterator erase_values(size_type first, size_type count);
 
-        SPARROW_API iterator rebuild_values(
-            std::vector<detail::union_rebuild_value> values,
-            size_type return_index
-        );
+
+        iterator rebuild_values(std::vector<detail::union_rebuild_value> values, size_type return_index);
 
         /**
          * @brief Gets mutable reference to the Arrow proxy.
@@ -980,6 +977,11 @@ namespace sparrow
          */
         SPARROW_API std::size_t element_offset(std::size_t i) const;
 
+        SPARROW_API iterator rebuild_in_place(
+            std::vector<detail::union_rebuild_value> values,
+            size_type return_index
+        );
+
         const std::int32_t* p_offsets;  ///< Pointer to offset buffer
         friend class union_array_crtp_base<dense_union_array>;
     };
@@ -1125,13 +1127,14 @@ namespace sparrow
          * @post Used internally for element access in sparse layout
          */
         [[nodiscard]] SPARROW_API std::size_t element_offset(std::size_t i) const;
+
+        SPARROW_API iterator rebuild_in_place(
+            std::vector<detail::union_rebuild_value> values,
+            size_type return_index
+        );
+
         friend class union_array_crtp_base<sparse_union_array>;
     };
-
-#ifdef __clang__
-    extern template class SPARROW_API union_array_crtp_base<dense_union_array>;
-    extern template class SPARROW_API union_array_crtp_base<sparse_union_array>;
-#endif
 
     /****************************************
      * union_array_crtp_base implementation *
@@ -1421,6 +1424,96 @@ namespace sparrow
     constexpr bool operator==(const union_array_crtp_base<D>& lhs, const union_array_crtp_base<D>& rhs)
     {
         return std::ranges::equal(lhs, rhs);
+    }
+
+    template <class DERIVED>
+    auto union_array_crtp_base<DERIVED>::insert(const_iterator pos, const_reference value, size_type count)
+        -> iterator
+    {
+        // A no-op insertion must not require offset zero (see insert_materialized).
+        if (count == 0)
+        {
+            return iterator(functor_type{&this->derived_cast()}, static_cast<size_type>(pos - cbegin()));
+        }
+        return insert_materialized(pos, std::views::single(array_materialize_element(value)), count);
+    }
+
+    template <class DERIVED>
+    auto union_array_crtp_base<DERIVED>::insert(
+        const_iterator pos,
+        const array_traits::value_type& value,
+        size_type count
+    ) -> iterator
+    {
+        return insert_materialized(pos, std::views::single(value), count);
+    }
+
+    template <class DERIVED>
+    void union_array_crtp_base<DERIVED>::push_back(const_reference value)
+    {
+        insert(cend(), value);
+    }
+
+    template <class DERIVED>
+    void union_array_crtp_base<DERIVED>::push_back(const array_traits::value_type& value)
+    {
+        insert(cend(), value);
+    }
+
+    template <class DERIVED>
+    void union_array_crtp_base<DERIVED>::resize(size_type new_length)
+    {
+        resize_impl(new_length, array_traits::value_type{});
+    }
+
+    template <class DERIVED>
+    void union_array_crtp_base<DERIVED>::resize(size_type new_length, const_reference value)
+    {
+        resize_impl(new_length, value);
+    }
+
+    template <class DERIVED>
+    void union_array_crtp_base<DERIVED>::resize(size_type new_length, const array_traits::value_type& value)
+    {
+        resize_impl(new_length, value);
+    }
+
+    template <class DERIVED>
+    auto union_array_crtp_base<DERIVED>::erase(const_iterator pos) -> iterator
+    {
+        const auto index = static_cast<size_type>(pos - cbegin());
+        SPARROW_ASSERT_TRUE(index < size());
+        return erase_values(index, 1);
+    }
+
+    template <class DERIVED>
+    auto union_array_crtp_base<DERIVED>::erase(const_iterator first, const_iterator last) -> iterator
+    {
+        const auto first_index = static_cast<size_type>(first - cbegin());
+        const auto last_index = static_cast<size_type>(last - cbegin());
+        SPARROW_ASSERT_TRUE(first_index <= last_index);
+        SPARROW_ASSERT_TRUE(last_index <= size());
+        return erase_values(first_index, last_index - first_index);
+    }
+
+    template <class DERIVED>
+    auto union_array_crtp_base<DERIVED>::erase_values(size_type first, size_type count) -> iterator
+    {
+        using rebuild_value = detail::union_rebuild_value;
+        SPARROW_ASSERT_TRUE(m_proxy.offset() == 0);
+        const auto current_size = size();
+        SPARROW_ASSERT_TRUE(first <= current_size);
+        SPARROW_ASSERT_TRUE(count <= current_size - first);
+        if (count == 0)
+        {
+            return iterator(functor_type{&this->derived_cast()}, first);
+        }
+
+        std::vector<rebuild_value> values;
+        values.reserve(current_size - count);
+        this->append_rebuild_entries(values, 0, first);
+        this->append_rebuild_entries(values, first + count, current_size);
+        return this->derived_cast().rebuild_in_place(std::move(values), first);
     }
 
     /************************************

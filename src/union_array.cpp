@@ -271,6 +271,14 @@ namespace sparrow
         return static_cast<std::size_t>(p_offsets[i + m_proxy.offset()]);
     }
 
+    auto dense_union_array::rebuild_in_place(
+        std::vector<detail::union_rebuild_value> values,
+        size_type return_index
+    ) -> iterator
+    {
+        return union_array_crtp_base<dense_union_array>::rebuild_values(std::move(values), return_index);
+    }
+
     /*************************************
      * sparse_union_array implementation *
      *************************************/
@@ -301,95 +309,12 @@ namespace sparrow
         return i + m_proxy.offset();
     }
 
-    template <class DERIVED>
-    auto union_array_crtp_base<DERIVED>::insert(
-        const_iterator pos,
-        const_reference value,
-        size_type count
+    auto sparse_union_array::rebuild_in_place(
+        std::vector<detail::union_rebuild_value> values,
+        size_type return_index
     ) -> iterator
     {
-        if (count == 0)
-        {
-            return iterator(functor_type{&this->derived_cast()}, static_cast<size_type>(pos - cbegin()));
-        }
-        return insert_materialized(pos, std::views::single(array_materialize_element(value)), count);
-    }
-
-    template <class DERIVED>
-    auto union_array_crtp_base<DERIVED>::insert(
-        const_iterator pos,
-        const array_traits::value_type& value,
-        size_type count
-    ) -> iterator
-    {
-        return insert_materialized(pos, std::views::single(value), count);
-    }
-
-    template <class DERIVED>
-    void union_array_crtp_base<DERIVED>::push_back(const_reference value)
-    {
-        insert(cend(), value);
-    }
-
-    template <class DERIVED>
-    void union_array_crtp_base<DERIVED>::push_back(const array_traits::value_type& value)
-    {
-        insert(cend(), value);
-    }
-
-    template <class DERIVED>
-    void union_array_crtp_base<DERIVED>::resize(size_type new_length)
-    {
-        resize_impl(new_length, array_traits::value_type{});
-    }
-
-    template <class DERIVED>
-    void union_array_crtp_base<DERIVED>::resize(size_type new_length, const_reference value)
-    {
-        resize_impl(new_length, value);
-    }
-
-    template <class DERIVED>
-    void union_array_crtp_base<DERIVED>::resize(size_type new_length, const array_traits::value_type& value)
-    {
-        resize_impl(new_length, value);
-    }
-
-    template <class DERIVED>
-    auto union_array_crtp_base<DERIVED>::erase(const_iterator pos) -> iterator
-    {
-        const auto index = static_cast<size_type>(pos - cbegin());
-        SPARROW_ASSERT_TRUE(index < size());
-        return erase_values(index, 1);
-    }
-
-    template <class DERIVED>
-    auto union_array_crtp_base<DERIVED>::erase(const_iterator first, const_iterator last) -> iterator
-    {
-        const auto first_index = static_cast<size_type>(first - cbegin());
-        const auto last_index = static_cast<size_type>(last - cbegin());
-        SPARROW_ASSERT_TRUE(first_index <= last_index);
-        SPARROW_ASSERT_TRUE(last_index <= size());
-        return erase_values(first_index, last_index - first_index);
-    }
-
-    template <class DERIVED>
-    auto union_array_crtp_base<DERIVED>::erase_values(size_type first, size_type count) -> iterator
-    {
-        SPARROW_ASSERT_TRUE(m_proxy.offset() == 0);
-        const auto current_size = size();
-        SPARROW_ASSERT_TRUE(first <= current_size);
-        SPARROW_ASSERT_TRUE(count <= current_size - first);
-        if (count == 0)
-        {
-            return iterator(functor_type{&this->derived_cast()}, first);
-        }
-
-        std::vector<rebuild_value> values;
-        values.reserve(current_size - count);
-        this->append_rebuild_entries(values, 0, first);
-        this->append_rebuild_entries(values, first + count, current_size);
-        return rebuild_values(std::move(values), first);
+        return union_array_crtp_base<sparse_union_array>::rebuild_values(std::move(values), return_index);
     }
 
     /**
@@ -637,75 +562,4 @@ namespace sparrow
 
         return iterator(functor_type{&this->derived_cast()}, return_index);
     }
-
-#define SPARROW_INSTANTIATE_UNION_CRTP_BASE(TYPE)                                                        \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::insert(                                        \
-        const_iterator,                                                                                   \
-        const_reference,                                                                                  \
-        size_type                                                                                         \
-    ) -> iterator;                                                                                        \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::insert(                                        \
-        const_iterator,                                                                                   \
-        const array_traits::value_type&,                                                                  \
-        size_type                                                                                         \
-    ) -> iterator;                                                                                        \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::erase(const_iterator) -> iterator;             \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::erase(const_iterator, const_iterator)          \
-        -> iterator;                                                                                      \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::erase_values(size_type, size_type)             \
-        -> iterator;                                                                                      \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::rebuild_values(                                \
-        std::vector<detail::union_rebuild_value>,                                                        \
-        size_type                                                                                         \
-    ) -> iterator;                                                                                        \
-    template SPARROW_API void union_array_crtp_base<TYPE>::push_back(const_reference);                    \
-    template SPARROW_API void union_array_crtp_base<TYPE>::push_back(const array_traits::value_type&);    \
-    template SPARROW_API void union_array_crtp_base<TYPE>::resize(size_type);                             \
-    template SPARROW_API void union_array_crtp_base<TYPE>::resize(size_type, const_reference);            \
-    template SPARROW_API void union_array_crtp_base<TYPE>::resize(                                        \
-        size_type,                                                                                        \
-        const array_traits::value_type&                                                                   \
-    );                                                                                                    \
-    template SPARROW_API union_array_crtp_base<TYPE>::union_array_crtp_base(arrow_proxy);                 \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::child_type_ids_from_format(                    \
-        std::string_view                                                                                  \
-    ) -> std::vector<std::uint8_t>;                                                                       \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::make_type_id_map(                              \
-        std::span<const std::uint8_t>                                                                     \
-    ) -> type_id_map;                                                                                     \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::operator=(                                     \
-        const union_array_crtp_base<TYPE>&                                                                \
-    ) -> union_array_crtp_base<TYPE>&;                                                                    \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::make_children(arrow_proxy&) -> children_type;  \
-    template SPARROW_API union_array_crtp_base<TYPE>::union_array_crtp_base(                              \
-        const union_array_crtp_base<TYPE>&                                                                \
-    );                                                                                                    \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::name() const                                   \
-        -> std::optional<std::string_view>;                                                               \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::metadata() const                               \
-        -> std::optional<key_value_view>;                                                                 \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::operator[](size_type) const -> value_type;      \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::operator[](size_type) -> value_type;           \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::front() const -> value_type;                   \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::empty() const -> bool;                         \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::size() const -> size_type;                     \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::begin() -> iterator;                           \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::end() -> iterator;                             \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::begin() const -> const_iterator;               \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::end() const -> const_iterator;                 \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::cbegin() const -> const_iterator;              \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::cend() const -> const_iterator;                \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::rbegin() const -> const_reverse_iterator;      \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::rend() const -> const_reverse_iterator;        \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::crbegin() const -> const_reverse_iterator;     \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::crend() const -> const_reverse_iterator;       \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::back() const -> value_type;                    \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::get_arrow_proxy() -> arrow_proxy&;             \
-    template SPARROW_API auto union_array_crtp_base<TYPE>::get_arrow_proxy() const                        \
-        -> const arrow_proxy&;
-
-    SPARROW_INSTANTIATE_UNION_CRTP_BASE(dense_union_array)
-    SPARROW_INSTANTIATE_UNION_CRTP_BASE(sparse_union_array)
-
-#undef SPARROW_INSTANTIATE_UNION_CRTP_BASE
 }
