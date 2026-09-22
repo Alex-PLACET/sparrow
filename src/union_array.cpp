@@ -30,7 +30,18 @@ namespace sparrow
     {
         using dynamic_value = array_traits::value_type;
         using rebuild_value = detail::union_rebuild_value;
-        using rebuild_source = detail::union_rebuild_source;
+
+        /// @brief Resolves the child a plan entry targets: inserted values carry no child index,
+        ///        only the index of the value they insert.
+        std::size_t child_of(const rebuild_value& value, std::span<const std::size_t> inserted_children)
+        {
+            if (value.inserted)
+            {
+                SPARROW_ASSERT_TRUE(value.row < inserted_children.size());
+                return inserted_children[value.row];
+            }
+            return value.child;
+        }
 
         array make_empty_child(const array_wrapper& child)
         {
@@ -72,16 +83,6 @@ namespace sparrow
             );
         }
 
-        /**
-        * @brief Creates a null value for the given array wrapper.
-        * @param child The array wrapper for which to create a null value.
-        * @return A dynamic_value representing the null value.
-        */
-        dynamic_value make_null_value(const array_wrapper& child)
-        {
-            return make_null_like(array_default_value(child));
-        }
-
         struct union_rebuild_payload
         {
             std::vector<std::vector<rebuild_value>> child_values;
@@ -91,12 +92,14 @@ namespace sparrow
 
         /**
          * @brief Creates a rebuild payload for a dense union array.
-         * @param values The values to be rebuilt.
+         * @param values The rows to be rebuilt.
+         * @param inserted_children Child index of each inserted value, in insertion order.
          * @param child_type_ids The type IDs of the child arrays.
          * @return A union_rebuild_payload containing the rebuilt data.
          */
         union_rebuild_payload make_dense_rebuild_payload(
-            std::span<rebuild_value> values,
+            std::span<const rebuild_value> values,
+            std::span<const std::size_t> inserted_children,
             std::span<const std::uint8_t> child_type_ids
         )
         {
@@ -108,107 +111,60 @@ namespace sparrow
             std::vector<std::size_t> child_value_counts(child_type_ids.size(), 0);
             for (const auto& value : values)
             {
-                ++child_value_counts[value.first];
+                ++child_value_counts[child_of(value, inserted_children)];
             }
             for (std::size_t child_index = 0; child_index < child_type_ids.size(); ++child_index)
             {
                 payload.child_values[child_index].reserve(child_value_counts[child_index]);
             }
 
-            for (auto& value : values)
+            for (const auto& value : values)
             {
-                const auto child_index = value.first;
+                const auto child_index = child_of(value, inserted_children);
                 payload.type_ids.push_back(child_type_ids[child_index]);
                 SPARROW_ASSERT_TRUE(
                     payload.child_values[child_index].size()
                     <= static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max())
                 );
                 payload.offsets.push_back(static_cast<std::uint32_t>(payload.child_values[child_index].size()));
-                payload.child_values[child_index].push_back(std::move(value));
+                payload.child_values[child_index].push_back(value);
             }
             return payload;
         }
 
         /**
          * @brief Creates a rebuild payload for a sparse union array.
-         * @tparam CHILDREN The type of the old children array wrappers.
-         * @param values The values to be rebuilt.
+         * @param values The rows to be rebuilt.
+         * @param inserted_children Child index of each inserted value, in insertion order.
          * @param child_type_ids The type IDs of the child arrays.
-         * @param old_children The old children array wrappers.
+         * @param fillers The row padding the non-selected output rows of each child.
          * @return A union_rebuild_payload containing the rebuilt data.
          */
-        template <typename CHILDREN>
         union_rebuild_payload make_sparse_rebuild_payload(
-            std::span<rebuild_value> values,
+            std::span<const rebuild_value> values,
+            std::span<const std::size_t> inserted_children,
             std::span<const std::uint8_t> child_type_ids,
-            const CHILDREN& old_children
+            std::span<const rebuild_value> fillers
         )
         {
             union_rebuild_payload payload;
             payload.child_values.resize(child_type_ids.size());
             payload.type_ids.reserve(values.size());
-
-            std::vector<std::optional<rebuild_value>> null_values(child_type_ids.size());
-            for (std::size_t child_index = 0; child_index < old_children.size(); ++child_index)
+            for (const auto& value : values)
             {
-                const auto& old_child = *old_children[child_index];
-                const auto child_size = array_size(old_child);
-                if (child_size == 0)
-                {
-                    continue;
-                }
-
-                std::size_t null_index = 0;
-                while (null_index < child_size && array_has_value(old_child, null_index))
-                {
-                    ++null_index;
-                }
-                null_values[child_index] = rebuild_value{
-                    child_index,
-                    rebuild_source{
-                        null_index == child_size ? std::size_t{0} : null_index,
-                        null_index == child_size
-                    }
-                };
-            }
-            for (auto& value : values)
-            {
-                const auto child_index = value.first;
-                payload.type_ids.push_back(child_type_ids[child_index]);
-                if (!null_values[child_index].has_value())
-                {
-                    if (const auto* inserted_value = std::get_if<dynamic_value>(&value.second))
-                    {
-                        null_values[child_index] = rebuild_value{
-                            child_index,
-                            make_null_like(*inserted_value)
-                        };
-                    }
-                }
+                payload.type_ids.push_back(child_type_ids[child_of(value, inserted_children)]);
             }
 
             for (std::size_t child_index = 0; child_index < child_type_ids.size(); ++child_index)
             {
-                if (!null_values[child_index].has_value() && child_index < old_children.size())
+                SPARROW_ASSERT_TRUE(child_index < fillers.size());
+                auto& child_values = payload.child_values[child_index];
+                child_values.reserve(values.size());
+                for (const auto& value : values)
                 {
-                    null_values[child_index] = rebuild_value{
-                        child_index,
-                        make_null_value(*old_children[child_index])
-                    };
-                }
-                SPARROW_ASSERT_TRUE(null_values[child_index].has_value() || values.empty());
-
-                payload.child_values[child_index].reserve(values.size());
-                for (std::size_t row = 0; row < values.size(); ++row)
-                {
-                    if (values[row].first == child_index)
-                    {
-                        payload.child_values[child_index].push_back(std::move(values[row]));
-                    }
-                    else
-                    {
-                        payload.child_values[child_index].push_back(*null_values[child_index]);
-                    }
+                    child_values.push_back(
+                        child_of(value, inserted_children) == child_index ? value : fillers[child_index]
+                    );
                 }
             }
             return payload;
@@ -273,10 +229,15 @@ namespace sparrow
 
     auto dense_union_array::rebuild_in_place(
         std::vector<detail::union_rebuild_value> values,
+        std::vector<array_traits::value_type> inserted,
         size_type return_index
     ) -> iterator
     {
-        return union_array_crtp_base<dense_union_array>::rebuild_values(std::move(values), return_index);
+        return union_array_crtp_base<dense_union_array>::rebuild_values(
+            std::move(values),
+            std::move(inserted),
+            return_index
+        );
     }
 
     /*************************************
@@ -311,10 +272,15 @@ namespace sparrow
 
     auto sparse_union_array::rebuild_in_place(
         std::vector<detail::union_rebuild_value> values,
+        std::vector<array_traits::value_type> inserted,
         size_type return_index
     ) -> iterator
     {
-        return union_array_crtp_base<sparse_union_array>::rebuild_values(std::move(values), return_index);
+        return union_array_crtp_base<sparse_union_array>::rebuild_values(
+            std::move(values),
+            std::move(inserted),
+            return_index
+        );
     }
 
     /**
@@ -349,62 +315,72 @@ namespace sparrow
     }
 
     /**
-     * @brief Appends the rebuild values of one child to @p destination.
+     * @brief Appends the rebuild rows of one child to @p destination.
      *
-     * Values reading consecutive rows of the same old child are appended with a single range
-     * insertion, and filler rows with a single repeated insertion of one shared row. Appending
-     * value by value slices the old child once per value and rebuilds nested unions once per
-     * value, which is quadratic.
+     * Rows reading consecutive rows of the old child are appended with a single range insertion,
+     * and repeated rows (an inserted value inserted several times, or a filler row) with a single
+     * repeated insertion..
      */
     template <typename CHILDREN>
-    void append_rebuild_values(array& destination, std::vector<rebuild_value>& values, const CHILDREN& old_children)
+    void append_rebuild_values(
+        array& destination,
+        std::span<const rebuild_value> values,
+        std::span<const dynamic_value> inserted,
+        std::span<const std::size_t> inserted_children,
+        const CHILDREN& old_children
+    )
     {
-        // View over the old child the values are read from, built once per child.
+        // View over the old child the rows are read from, and the filler row reused by every
+        // filler run of that child (interleaved filler rows would otherwise be re-sliced once
+        // per row).
         std::optional<array> old_child_view;
-        // Every filler row of a child refers to the same old child row: slice it once.
         std::optional<array> filler_row;
 
         for (std::size_t index = 0; index < values.size();)
         {
-            const auto* source = std::get_if<rebuild_source>(&values[index].second);
-            if (source == nullptr)
-            {
-                array inserted = array_make_from_element(std::move(std::get<dynamic_value>(values[index].second)));
-                destination.insert(destination.cend(), inserted.cbegin(), inserted.cend());
-                ++index;
-                continue;
-            }
+            const auto child_index = child_of(values[index], inserted_children);
+            const bool is_inserted = values[index].inserted;
+            const bool force_null = values[index].force_null;
+            const auto row = values[index].row;
 
+            // A run repeats the same row (filler, inserted value) or reads consecutive rows.
             std::size_t count = 1;
             while (index + count < values.size())
             {
-                const auto* next = std::get_if<rebuild_source>(&values[index + count].second);
-                if (next == nullptr || values[index + count].first != values[index].first
-                    || next->force_null != source->force_null
-                    || (source->force_null ? next->index != source->index
-                                           : next->index != source->index + count))
+                const auto& next = values[index + count];
+                if (child_of(next, inserted_children) != child_index || next.inserted != is_inserted
+                    || next.force_null != force_null
+                    || next.row != (force_null || is_inserted ? row : row + count))
                 {
                     break;
                 }
                 ++count;
             }
 
-            if (!old_child_view.has_value())
+            if (is_inserted)
             {
-                old_child_view = array{old_children[values[index].first]->get_arrow_proxy().view()};
+                const array inserted_row = array_make_from_element(inserted[row]);
+                destination.insert(destination.cend(), inserted_row.cbegin(), inserted_row.cend(), count);
+                index += count;
+                continue;
             }
 
-            if (source->force_null)
+            if (!old_child_view.has_value())
+            {
+                old_child_view = array{old_children[child_index]->get_arrow_proxy().view()};
+            }
+
+            if (force_null)
             {
                 if (!filler_row.has_value())
                 {
-                    filler_row = make_filler_row(*old_child_view, source->index);
+                    filler_row = make_filler_row(*old_child_view, row);
                 }
                 destination.insert(destination.cend(), filler_row->cbegin(), filler_row->cend(), count);
             }
             else
             {
-                append_old_child_values(destination, *old_child_view, source->index, count);
+                append_old_child_values(destination, *old_child_view, row, count);
             }
             index += count;
         }
@@ -413,6 +389,7 @@ namespace sparrow
     template <class DERIVED>
     auto union_array_crtp_base<DERIVED>::rebuild_values(
         std::vector<rebuild_value> values,
+        std::vector<dynamic_value> inserted,
         size_type return_index
     ) -> iterator
     {
@@ -473,28 +450,64 @@ namespace sparrow
             return child_index;
         };
 
-        for (auto& value : values)
+        // Inserted values are resolved once each, however often the plan refers to them.
+        std::vector<std::size_t> inserted_children;
+        inserted_children.reserve(inserted.size());
+        for (const auto& value : inserted)
         {
-            if (value.first == detail::union_no_child)
+            inserted_children.push_back(resolve_child_index(value));
+        }
+
+        // Row padding the output rows a child is not selected for (sparse unions only). An old
+        // child with rows reuses its first row, marked null on copy, a child without rows (empty,
+        // or created for an inserted value) is padded with a null of its own type, materialized
+        // once as an inserted value.
+        std::vector<rebuild_value> fillers(child_schemas.size());
+        for (std::size_t child_index = 0; child_index < fillers.size(); ++child_index)
+        {
+            if (child_index < old_child_count && array_size(*m_children[child_index]) > 0)
             {
-                const auto* inserted_value = std::get_if<dynamic_value>(&value.second);
-                SPARROW_ASSERT_TRUE(inserted_value != nullptr);
-                value.first = resolve_child_index(*inserted_value);
+                fillers[child_index] = rebuild_value{.child = child_index, .row = 0, .force_null = true};
+                continue;
             }
+
+            // A child created for an inserted value has no rows yet: derive its null from the
+            // value that created it, an empty old child from its own default element.
+            dynamic_value default_value;
+            if (child_index < old_child_count)
+            {
+                default_value = array_default_value(*m_children[child_index]);
+            }
+            else
+            {
+                const auto creator = std::ranges::find(inserted_children, child_index);
+                SPARROW_ASSERT_TRUE(creator != inserted_children.end());
+                default_value = inserted[static_cast<std::size_t>(creator - inserted_children.begin())];
+            }
+            inserted.push_back(make_null_like(default_value));
+            // Keep the two parallel lists in sync: entries refer to the filler by inserted value
+            // index, and their child index is read back from inserted_children.
+            inserted_children.push_back(child_index);
+            fillers[child_index] = rebuild_value{.row = inserted.size() - 1, .inserted = true};
         }
 
         auto payload = [&]
         {
             if constexpr (is_dense_union_array_v<DERIVED>)
             {
-                return make_dense_rebuild_payload(std::span<rebuild_value>{values}, child_type_ids);
+                return make_dense_rebuild_payload(
+                    std::span<const rebuild_value>{values},
+                    std::span<const std::size_t>{inserted_children},
+                    child_type_ids
+                );
             }
             else
             {
                 return make_sparse_rebuild_payload(
-                    std::span<rebuild_value>{values},
+                    std::span<const rebuild_value>{values},
+                    std::span<const std::size_t>{inserted_children},
                     child_type_ids,
-                    m_children
+                    fillers
                 );
             }
         }();
@@ -519,7 +532,7 @@ namespace sparrow
             else
             {
                 child.erase(child.cbegin(), child.cend());
-                append_rebuild_values(child, values_for_child, m_children);
+                append_rebuild_values(child, values_for_child, inserted, inserted_children, m_children);
             }
             new_children.push_back(std::move(child));
         }

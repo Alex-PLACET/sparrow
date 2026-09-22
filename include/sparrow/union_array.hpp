@@ -70,17 +70,22 @@ namespace sparrow
             }
         };
 
-        struct union_rebuild_source
-        {
-            std::size_t index;
-            bool force_null;
-        };
-
-        using union_rebuild_value = std::pair<
-            std::size_t,
-            std::variant<union_rebuild_source, array_traits::value_type>>;
-
         inline constexpr std::size_t union_no_child = std::numeric_limits<std::size_t>::max();
+
+        /**
+         * @brief One row of a rebuild plan.
+         *
+         * A row is either a copy of an existing child's row (@c child / @c row), or an inserted
+         * value, in which case @c child is union_no_child and @c row indexes the plan's
+         * inserted-values list.
+         */
+        struct union_rebuild_value
+        {
+            std::size_t child = union_no_child;  ///< Source child, or union_no_child when inserted
+            std::size_t row = 0;                 ///< Row of the source child, or inserted-value index
+            bool force_null = false;             ///< Copy the row as null (sparse union filler row)
+            bool inserted = false;               ///< True when the entry is an inserted value
+        };
     }
 
     /**
@@ -395,7 +400,7 @@ namespace sparrow
         {
             if (count == 0)
             {
-                return iterator(functor_type{&this->derived_cast()}, static_cast<size_type>(pos - cbegin()));
+                return iterator_at(static_cast<size_type>(pos - cbegin()));
             }
 
             if constexpr (std::forward_iterator<InputIt>)
@@ -616,6 +621,11 @@ namespace sparrow
             }
         }
 
+        iterator iterator_at(size_type index)
+        {
+            return iterator(functor_type{&this->derived_cast()}, index);
+        }
+
         /**
          * @brief Appends one rebuild entry per element in [from, to), each referring to its
          *        current child slot.
@@ -629,8 +639,8 @@ namespace sparrow
             for (size_type index = from; index < to; ++index)
             {
                 entries.push_back(detail::union_rebuild_value{
-                    m_type_id_map[p_type_ids[index]],
-                    detail::union_rebuild_source{this->derived_cast().element_offset(index), false}
+                    .child = m_type_id_map[p_type_ids[index]],
+                    .row = this->derived_cast().element_offset(index)
                 });
             }
         }
@@ -642,33 +652,52 @@ namespace sparrow
             const auto pos_index = static_cast<size_type>(pos - cbegin());
             if (count == 0 || std::ranges::empty(values))
             {
-                return iterator(functor_type{&this->derived_cast()}, pos_index);
+                return iterator_at(pos_index);
             }
 
             SPARROW_ASSERT_TRUE(m_proxy.offset() == 0);
             SPARROW_ASSERT_TRUE(pos_index <= size());
 
             const auto old_size = size();
-            const auto value_count = static_cast<size_type>(std::ranges::distance(values));
+            std::vector<array_traits::value_type> inserted(values.begin(), values.end());
+            const auto value_count = static_cast<size_type>(inserted.size());
             std::vector<detail::union_rebuild_value> entries;
             entries.reserve(old_size + value_count * count);
 
             append_rebuild_entries(entries, 0, pos_index);
             for (size_type repetition = 0; repetition < count; ++repetition)
             {
-                for (const auto& value : values)
+                for (size_type value_index = 0; value_index < value_count; ++value_index)
                 {
-                    entries.emplace_back(detail::union_no_child, value);
+                    entries.push_back(detail::union_rebuild_value{
+                        .row = value_index,
+                        .inserted = true
+                    });
                 }
             }
             append_rebuild_entries(entries, pos_index, old_size);
-            return this->derived_cast().rebuild_in_place(std::move(entries), pos_index);
+            return this->derived_cast().rebuild_in_place(
+                std::move(entries),
+                std::move(inserted),
+                pos_index
+            );
         }
 
         iterator erase_values(size_type first, size_type count);
 
-
-        iterator rebuild_values(std::vector<detail::union_rebuild_value> values, size_type return_index);
+        /// @brief Rebuilds this array from @p values, the inserted values they reference, and
+        ///        returns an iterator to @p return_index.
+        ///
+        /// Only defined in the compiled library: it needs the complete `array` type, which this
+        /// header cannot include without a cycle. Each concrete layout exposes it to the library
+        /// boundary as its own `rebuild_in_place`, a plain exported member -- a member of this
+        /// class template cannot be exported (Clang ignores the visibility attribute on explicit
+        /// instantiations of template members).
+        iterator rebuild_values(
+            std::vector<detail::union_rebuild_value> values,
+            std::vector<array_traits::value_type> inserted,
+            size_type return_index
+        );
 
         /**
          * @brief Gets mutable reference to the Arrow proxy.
@@ -979,6 +1008,7 @@ namespace sparrow
 
         SPARROW_API iterator rebuild_in_place(
             std::vector<detail::union_rebuild_value> values,
+            std::vector<array_traits::value_type> inserted,
             size_type return_index
         );
 
@@ -1130,6 +1160,7 @@ namespace sparrow
 
         SPARROW_API iterator rebuild_in_place(
             std::vector<detail::union_rebuild_value> values,
+            std::vector<array_traits::value_type> inserted,
             size_type return_index
         );
 
@@ -1433,7 +1464,7 @@ namespace sparrow
         // A no-op insertion must not require offset zero (see insert_materialized).
         if (count == 0)
         {
-            return iterator(functor_type{&this->derived_cast()}, static_cast<size_type>(pos - cbegin()));
+            return iterator_at(static_cast<size_type>(pos - cbegin()));
         }
         return insert_materialized(pos, std::views::single(array_materialize_element(value)), count);
     }
@@ -1506,14 +1537,14 @@ namespace sparrow
         SPARROW_ASSERT_TRUE(count <= current_size - first);
         if (count == 0)
         {
-            return iterator(functor_type{&this->derived_cast()}, first);
+            return iterator_at(first);
         }
 
         std::vector<rebuild_value> values;
         values.reserve(current_size - count);
         this->append_rebuild_entries(values, 0, first);
         this->append_rebuild_entries(values, first + count, current_size);
-        return this->derived_cast().rebuild_in_place(std::move(values), first);
+        return this->derived_cast().rebuild_in_place(std::move(values), {}, first);
     }
 
     /************************************
