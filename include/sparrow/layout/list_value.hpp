@@ -531,6 +531,21 @@ struct std::formatter<sparrow::list_value>
         -> decltype(ctx.out());
 };
 
+template <typename L>
+struct std::formatter<sparrow::list_reference<L>>
+{
+    constexpr auto parse(std::format_parse_context& ctx) -> decltype(ctx.begin())
+    {
+        return ctx.begin();  // Simple implementation
+    }
+
+    auto format(const sparrow::list_reference<L>& ref, std::format_context& ctx) const -> decltype(ctx.out())
+    {
+        // list_reference is a view over one row; list_value already knows how to print itself.
+        return std::format_to(ctx.out(), "{}", static_cast<sparrow::list_value>(ref));
+    }
+};
+
 namespace sparrow
 {
     SPARROW_API std::ostream& operator<<(std::ostream& os, const list_value& value);
