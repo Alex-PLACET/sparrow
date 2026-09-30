@@ -17,12 +17,14 @@
 #include <array>
 #include <charconv>
 #include <cstdint>
+#include <functional>
 #include <iterator>
 #include <limits>
 #include <numeric>
 #include <optional>
 #include <ranges>
 #include <span>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <variant>
@@ -37,6 +39,7 @@
 #include "sparrow/layout/array_wrapper.hpp"
 #include "sparrow/layout/layout_utils.hpp"
 #include "sparrow/layout/nested_value_types.hpp"
+#include "sparrow/u8_buffer.hpp"
 #include "sparrow/utils/contracts.hpp"
 #include "sparrow/utils/crtp_base.hpp"
 #include "sparrow/utils/functor_index_iterator.hpp"
@@ -85,6 +88,20 @@ namespace sparrow
             std::size_t row = 0;                 ///< Row of the source child, or inserted-value index
             bool force_null = false;             ///< Copy the row as null (sparse union filler row)
             bool inserted = false;               ///< True when the entry is an inserted value
+        };
+
+        /**
+         * @brief Rebuilt data of a union array: the row plan of each child, plus the new
+         *        type-ID and (dense-only) offset buffers.
+         *
+         * The buffers are stored in their final ownership type so that the rebuilt proxy can
+         * take them by move, without an intermediate copy.
+         */
+        struct union_rebuild_payload
+        {
+            std::vector<std::vector<union_rebuild_value>> child_values;  ///< Row plan of each child
+            u8_buffer<std::uint8_t> type_ids{};                          ///< Type ID per output row
+            u8_buffer<std::uint32_t> offsets{};                          ///< Dense offsets (empty for sparse)
         };
     }
 
@@ -685,14 +702,135 @@ namespace sparrow
 
         iterator erase_values(size_type first, size_type count);
 
-        /// @brief Rebuilds this array from @p values, the inserted values they reference, and
-        ///        returns an iterator to @p return_index.
-        ///
-        /// Only defined in the compiled library: it needs the complete `array` type, which this
-        /// header cannot include without a cycle. Each concrete layout exposes it to the library
-        /// boundary as its own `rebuild_in_place`, a plain exported member -- a member of this
-        /// class template cannot be exported (Clang ignores the visibility attribute on explicit
-        /// instantiations of template members).
+        /**
+         * @brief Schema of one child of a rebuilt union array.
+         */
+        struct union_child_schema
+        {
+            data_type type;
+            std::string format;
+
+            [[nodiscard]] bool operator==(const union_child_schema& other) const = default;
+        };
+
+        /**
+         * @brief Initializes the schema bookkeeping of a rebuild from the current children.
+         *
+         * Copies the current child type IDs into @p child_type_ids (extended later by the
+         * children created for inserted values) and marks them as used in @p used_type_ids.
+         *
+         * @param child_type_ids Output: type ID of each current child, in child order
+         * @param used_type_ids Output: type IDs already assigned, marked with the current ones
+         * @return The schema of each current child, in child order
+         */
+        std::vector<union_child_schema> make_child_schemas(
+            std::vector<std::uint8_t>& child_type_ids,
+            std::array<bool, TYPE_ID_MAP_SIZE>& used_type_ids
+        ) const;
+
+        /**
+         * @brief Maps each inserted value to the child it belongs to.
+         *
+         * Alternatives already present in @p child_schemas reuse that child, others get a new
+         * child, appended to @p child_schemas, @p child_type_ids and @p new_child_templates,
+         * and a free type ID taken from @p used_type_ids.
+         *
+         * @param inserted Inserted values to resolve, in insertion order
+         * @param child_schemas Schemas of the existing children, extended with the created ones
+         * @param child_type_ids Type IDs of the existing children, extended with the created ones
+         * @param used_type_ids Type IDs already assigned, updated with the newly assigned ones
+         * @param new_child_templates Prototypes of the created children, appended to
+         * @return The child index of each inserted value, in insertion order
+         */
+        static std::vector<std::size_t> resolve_inserted_children(
+            std::span<const array_traits::value_type> inserted,
+            std::vector<union_child_schema>& child_schemas,
+            std::vector<std::uint8_t>& child_type_ids,
+            std::array<bool, TYPE_ID_MAP_SIZE>& used_type_ids,
+            std::vector<array>& new_child_templates
+        );
+
+        /**
+         * @brief Builds the row padding the output rows a child is not selected for.
+         *
+         * An old child with rows is padded by reusing its first row, marked null on copy, while a
+         * child without rows (empty, or created for an inserted value) is padded with a null of
+         * its own type, materialized once as an inserted value.
+         *
+         * @param old_child_count Number of children before the rebuild
+         * @param child_schemas Schemas of all children after the rebuild
+         * @param inserted_children Child index of each inserted value, kept in sync with @p inserted
+         * @param inserted Inserted values, appended with one null per padded child
+         * @return One filler row per child, in child order
+         */
+        std::vector<detail::union_rebuild_value> make_union_fillers(
+            size_type old_child_count,
+            const std::vector<union_child_schema>& child_schemas,
+            std::vector<std::size_t>& inserted_children,
+            std::vector<array_traits::value_type>& inserted
+        ) const;
+
+        /**
+         * @brief Plans the rebuilt data from the row plan and the inserted-value resolution.
+         *
+         * Dense unions build a per-child row plan and a type-ID/offset buffer pair, sparse
+         * unions pad every non-selected output row of a child with its filler row.
+         *
+         * @param values The rows to be rebuilt
+         * @param inserted_children Child index of each inserted value, in insertion order
+         * @param child_type_ids Type IDs of the children after the rebuild
+         * @param fillers The row padding the non-selected output rows of each child
+         * @return The rebuilt data
+         */
+        detail::union_rebuild_payload make_rebuild_payload(
+            std::span<const detail::union_rebuild_value> values,
+            std::span<const std::size_t> inserted_children,
+            std::span<const std::uint8_t> child_type_ids,
+            std::span<const detail::union_rebuild_value> fillers
+        ) const;
+
+        /**
+         * @brief Rebuilds each child array from the payload rows planned for it.
+         *
+         * @param payload Rebuilt data, holding the row plan of each child
+         * @param inserted Inserted values the rows may refer to
+         * @param inserted_children Child index of each inserted value
+         * @param old_children Children before the rebuild
+         * @param new_child_templates Prototypes the rebuilt children of an inserted
+         *        alternative are taken and left empty
+         * @return The rebuilt children, in child order
+         */
+        std::vector<array> build_rebuilt_children(
+            const detail::union_rebuild_payload& payload,
+            std::span<const array_traits::value_type> inserted,
+            std::span<const std::size_t> inserted_children,
+            const children_type& old_children,
+            std::vector<array>& new_child_templates
+        ) const;
+
+        /**
+         * @brief Creates the Arrow proxy of a rebuilt array from its children and buffers.
+         *
+         * @p payload is consumed: its type-ID and offset buffers are moved into the proxy.
+         */
+        arrow_proxy create_rebuild_proxy(
+            std::vector<array> children,
+            detail::union_rebuild_payload&& payload,
+            std::span<const std::uint8_t> child_type_ids
+        ) const;
+
+        /**
+         * @brief Replaces this array's data with the rebuilt @p replacement.
+         * @return An iterator to @p return_index.
+         */
+        iterator adopt_rebuilt_array(
+            arrow_proxy replacement,
+            std::vector<std::uint8_t> child_type_ids,
+            size_type return_index
+        );
+
+        /// Rebuilds this array from @p values, the inserted values they reference, and
+        /// @return returns an iterator to @p return_index.
         iterator rebuild_values(
             std::vector<detail::union_rebuild_value> values,
             std::vector<array_traits::value_type> inserted,

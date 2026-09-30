@@ -30,6 +30,18 @@ namespace sparrow
     {
         using dynamic_value = array_traits::value_type;
         using rebuild_value = detail::union_rebuild_value;
+        using union_rebuild_payload = detail::union_rebuild_payload;
+
+        /// @brief Finds an existing type ID not yet assigned, or TYPE_ID_MAP_SIZE if none is free.
+        std::size_t next_free_type_id(std::span<const bool> used_type_ids)
+        {
+            std::size_t type_id = 0;
+            while (type_id < used_type_ids.size() && used_type_ids[type_id])
+            {
+                ++type_id;
+            }
+            return type_id;
+        }
 
         /// @brief Resolves the child a plan entry targets: inserted values carry no child index,
         ///        only the index of the value they insert.
@@ -82,13 +94,6 @@ namespace sparrow
 #endif
             );
         }
-
-        struct union_rebuild_payload
-        {
-            std::vector<std::vector<rebuild_value>> child_values;
-            std::vector<std::uint8_t> type_ids;
-            std::vector<std::uint32_t> offsets;
-        };
 
         /**
          * @brief Creates a rebuild payload for a dense union array.
@@ -303,10 +308,6 @@ namespace sparrow
 
     /**
      * @brief Appends @p count consecutive rows of an old child, in a single insertion.
-     *
-     * The slice is borrowed: the old child outlives the insertion (the children wrappers are
-     * only rebuilt once the new proxy is in place), and a deep copy per insertion is what made
-     * the rebuild quadratic in the child size.
      */
     void append_old_child_values(array& destination, const array& old_child_view, std::size_t first_row, std::size_t count)
     {
@@ -387,28 +388,18 @@ namespace sparrow
     }
 
     template <class DERIVED>
-    auto union_array_crtp_base<DERIVED>::rebuild_values(
-        std::vector<rebuild_value> values,
-        std::vector<dynamic_value> inserted,
-        size_type return_index
-    ) -> iterator
+    auto union_array_crtp_base<DERIVED>::make_child_schemas(
+        std::vector<std::uint8_t>& child_type_ids,
+        std::array<bool, TYPE_ID_MAP_SIZE>& used_type_ids
+    ) const -> std::vector<union_child_schema>
     {
-        const auto old_child_count = m_children.size();
-        SPARROW_ASSERT_TRUE(m_child_type_ids.size() == old_child_count);
-        std::vector<std::uint8_t> child_type_ids = m_child_type_ids;
-        std::array<bool, TYPE_ID_MAP_SIZE> used_type_ids{};
+        const auto child_count = m_children.size();
+        child_type_ids = m_child_type_ids;
+        SPARROW_ASSERT_TRUE(child_type_ids.size() == child_count);
 
-        struct child_schema
-        {
-            data_type type;
-            std::string format;
-
-            [[nodiscard]] bool operator==(const child_schema& other) const = default;
-        };
-
-        std::vector<child_schema> child_schemas;
-        child_schemas.reserve(old_child_count);
-        for (std::size_t child_index = 0; child_index < old_child_count; ++child_index)
+        std::vector<union_child_schema> child_schemas;
+        child_schemas.reserve(child_count);
+        for (std::size_t child_index = 0; child_index < child_count; ++child_index)
         {
             used_type_ids[child_type_ids[child_index]] = true;
             child_schemas.emplace_back(
@@ -416,52 +407,55 @@ namespace sparrow
                 std::string(m_children[child_index]->get_arrow_proxy().format())
             );
         }
+        return child_schemas;
+    }
 
-        // Prototypes of the children created for the inserted values, indexed by
-        // child_index - old_child_count.
-        std::vector<array> new_child_templates;
-
-        auto resolve_child_index = [&](const dynamic_value& value) -> size_type
+    template <class DERIVED>
+    auto union_array_crtp_base<DERIVED>::resolve_inserted_children(
+        std::span<const array_traits::value_type> inserted,
+        std::vector<union_child_schema>& child_schemas,
+        std::vector<std::uint8_t>& child_type_ids,
+        std::array<bool, TYPE_ID_MAP_SIZE>& used_type_ids,
+        std::vector<array>& new_child_templates
+    ) -> std::vector<std::size_t>
+    {
+        std::vector<std::size_t> inserted_children;
+        inserted_children.reserve(inserted.size());
+        for (const auto& value : inserted)
         {
             auto child = array_make_from_element(value);
-            const child_schema schema{
+            const union_child_schema schema{
                 child.data_type(),
                 std::string(detail::array_access::get_arrow_proxy(child).format())
             };
             const auto existing = std::ranges::find(child_schemas, schema);
             if (existing != child_schemas.end())
             {
-                return static_cast<size_type>(existing - child_schemas.begin());
+                inserted_children.push_back(static_cast<std::size_t>(existing - child_schemas.begin()));
+                continue;
             }
 
             SPARROW_ASSERT_TRUE(child_schemas.size() < TYPE_ID_MAP_SIZE);
-            std::size_t type_id = 0;
-            while (type_id < TYPE_ID_MAP_SIZE && used_type_ids[type_id])
-            {
-                ++type_id;
-            }
+            const auto type_id = next_free_type_id(used_type_ids);
             SPARROW_ASSERT_TRUE(type_id < TYPE_ID_MAP_SIZE);
             used_type_ids[type_id] = true;
 
-            const auto child_index = child_schemas.size();
+            inserted_children.push_back(child_schemas.size());
             child_schemas.push_back(schema);
             child_type_ids.push_back(static_cast<std::uint8_t>(type_id));
             new_child_templates.push_back(std::move(child));
-            return child_index;
-        };
-
-        // Inserted values are resolved once each, however often the plan refers to them.
-        std::vector<std::size_t> inserted_children;
-        inserted_children.reserve(inserted.size());
-        for (const auto& value : inserted)
-        {
-            inserted_children.push_back(resolve_child_index(value));
         }
+        return inserted_children;
+    }
 
-        // Row padding the output rows a child is not selected for (sparse unions only). An old
-        // child with rows reuses its first row, marked null on copy, a child without rows (empty,
-        // or created for an inserted value) is padded with a null of its own type, materialized
-        // once as an inserted value.
+    template <class DERIVED>
+    auto union_array_crtp_base<DERIVED>::make_union_fillers(
+        size_type old_child_count,
+        const std::vector<union_child_schema>& child_schemas,
+        std::vector<std::size_t>& inserted_children,
+        std::vector<array_traits::value_type>& inserted
+    ) const -> std::vector<rebuild_value>
+    {
         std::vector<rebuild_value> fillers(child_schemas.size());
         for (std::size_t child_index = 0; child_index < fillers.size(); ++child_index)
         {
@@ -490,34 +484,43 @@ namespace sparrow
             inserted_children.push_back(child_index);
             fillers[child_index] = rebuild_value{.row = inserted.size() - 1, .inserted = true};
         }
+        return fillers;
+    }
 
-        auto payload = [&]
+    template <class DERIVED>
+    auto union_array_crtp_base<DERIVED>::make_rebuild_payload(
+        std::span<const rebuild_value> values,
+        std::span<const std::size_t> inserted_children,
+        std::span<const std::uint8_t> child_type_ids,
+        std::span<const rebuild_value> fillers
+    ) const -> union_rebuild_payload
+    {
+        if constexpr (is_dense_union_array_v<DERIVED>)
         {
-            if constexpr (is_dense_union_array_v<DERIVED>)
-            {
-                return make_dense_rebuild_payload(
-                    std::span<const rebuild_value>{values},
-                    std::span<const std::size_t>{inserted_children},
-                    child_type_ids
-                );
-            }
-            else
-            {
-                return make_sparse_rebuild_payload(
-                    std::span<const rebuild_value>{values},
-                    std::span<const std::size_t>{inserted_children},
-                    child_type_ids,
-                    fillers
-                );
-            }
-        }();
+            return make_dense_rebuild_payload(values, inserted_children, child_type_ids);
+        }
+        else
+        {
+            return make_sparse_rebuild_payload(values, inserted_children, child_type_ids, fillers);
+        }
+    }
 
+    template <class DERIVED>
+    auto union_array_crtp_base<DERIVED>::build_rebuilt_children(
+        const detail::union_rebuild_payload& payload,
+        std::span<const array_traits::value_type> inserted,
+        std::span<const std::size_t> inserted_children,
+        const children_type& old_children,
+        std::vector<array>& new_child_templates
+    ) const -> std::vector<array>
+    {
+        const auto old_child_count = old_children.size();
         std::vector<array> new_children;
-        new_children.reserve(child_schemas.size());
-        for (std::size_t child_index = 0; child_index < child_schemas.size(); ++child_index)
+        new_children.reserve(payload.child_values.size());
+        for (std::size_t child_index = 0; child_index < payload.child_values.size(); ++child_index)
         {
             array child = child_index < old_child_count
-                              ? make_empty_child(*m_children[child_index])
+                              ? make_empty_child(*old_children[child_index])
                               : std::move(new_child_templates[child_index - old_child_count]);
             auto& values_for_child = payload.child_values[child_index];
             if (child.data_type() == data_type::NA)
@@ -532,37 +535,54 @@ namespace sparrow
             else
             {
                 child.erase(child.cbegin(), child.cend());
-                append_rebuild_values(child, values_for_child, inserted, inserted_children, m_children);
+                append_rebuild_values(child, values_for_child, inserted, inserted_children, old_children);
             }
             new_children.push_back(std::move(child));
         }
+        return new_children;
+    }
 
+    template <class DERIVED>
+    auto union_array_crtp_base<DERIVED>::create_rebuild_proxy(
+        std::vector<array> children,
+        detail::union_rebuild_payload&& payload,
+        std::span<const std::uint8_t> child_type_ids
+    ) const -> arrow_proxy
+    {
         auto metadata = m_proxy.metadata();
-        auto replacement = [&]() -> arrow_proxy
+        std::optional<std::vector<std::uint8_t>> type_id_mapping{
+            std::vector<std::uint8_t>{child_type_ids.begin(), child_type_ids.end()}
+        };
+        if constexpr (is_dense_union_array_v<DERIVED>)
         {
-            if constexpr (is_dense_union_array_v<DERIVED>)
-            {
-                return DERIVED::create_proxy(
-                    std::move(new_children),
-                    typename DERIVED::type_id_buffer_type{payload.type_ids},
-                    typename DERIVED::offset_buffer_type{payload.offsets},
-                    std::optional<std::vector<std::uint8_t>>(child_type_ids),
-                    m_proxy.name(),
-                    std::move(metadata)
-                );
-            }
-            else
-            {
-                return DERIVED::create_proxy(
-                    std::move(new_children),
-                    typename DERIVED::type_id_buffer_type{payload.type_ids},
-                    std::optional<std::vector<std::uint8_t>>(child_type_ids),
-                    m_proxy.name(),
-                    std::move(metadata)
-                );
-            }
-        }();
+            return DERIVED::create_proxy(
+                std::move(children),
+                std::move(payload.type_ids),
+                std::move(payload.offsets),
+                std::move(type_id_mapping),
+                m_proxy.name(),
+                std::move(metadata)
+            );
+        }
+        else
+        {
+            return DERIVED::create_proxy(
+                std::move(children),
+                std::move(payload.type_ids),
+                std::move(type_id_mapping),
+                m_proxy.name(),
+                std::move(metadata)
+            );
+        }
+    }
 
+    template <class DERIVED>
+    auto union_array_crtp_base<DERIVED>::adopt_rebuilt_array(
+        arrow_proxy replacement,
+        std::vector<std::uint8_t> child_type_ids,
+        size_type return_index
+    ) -> iterator
+    {
         m_proxy = std::move(replacement);
         p_type_ids = reinterpret_cast<std::uint8_t*>(m_proxy.buffers()[0].data());
         m_children = make_children(m_proxy);
@@ -572,7 +592,57 @@ namespace sparrow
         {
             this->derived_cast().p_offsets = reinterpret_cast<std::int32_t*>(m_proxy.buffers()[1].data());
         }
-
         return iterator(functor_type{&this->derived_cast()}, return_index);
+    }
+
+    template <class DERIVED>
+    auto union_array_crtp_base<DERIVED>::rebuild_values(
+        std::vector<rebuild_value> values,
+        std::vector<dynamic_value> inserted,
+        size_type return_index
+    ) -> iterator
+    {
+        const auto old_child_count = m_children.size();
+
+        std::vector<std::uint8_t> child_type_ids;
+        std::array<bool, TYPE_ID_MAP_SIZE> used_type_ids{};
+        std::vector<union_child_schema> child_schemas = make_child_schemas(child_type_ids, used_type_ids);
+
+        // Inserted values are resolved once each, however often the plan refers to them.
+        std::vector<array> new_child_templates;
+        std::vector<std::size_t> inserted_children = resolve_inserted_children(
+            inserted,
+            child_schemas,
+            child_type_ids,
+            used_type_ids,
+            new_child_templates
+        );
+
+        std::vector<rebuild_value> fillers;
+        if constexpr (!is_dense_union_array_v<DERIVED>)
+        {
+            fillers = make_union_fillers(old_child_count, child_schemas, inserted_children, inserted);
+        }
+
+        union_rebuild_payload payload = make_rebuild_payload(
+            std::span<const rebuild_value>{values},
+            std::span<const std::size_t>{inserted_children},
+            child_type_ids,
+            std::span<const rebuild_value>{fillers}
+        );
+
+        std::vector<array> new_children = build_rebuilt_children(
+            payload,
+            inserted,
+            inserted_children,
+            m_children,
+            new_child_templates
+        );
+
+        return adopt_rebuilt_array(
+            create_rebuild_proxy(std::move(new_children), std::move(payload), child_type_ids),
+            std::move(child_type_ids),
+            return_index
+        );
     }
 }
