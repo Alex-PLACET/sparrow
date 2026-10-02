@@ -741,7 +741,7 @@ namespace sparrow
             CHECK_EQ(proxy_after_insert.children()[1].length(), 2);
 
             const auto& offsets = proxy_after_insert.buffers()[1];
-            const auto* offset_data = reinterpret_cast<const std::int32_t*>(offsets.data());
+            const auto* offset_data = offsets.data<std::int32_t>();
             CHECK_EQ(offset_data[0], 0);
             CHECK_EQ(offset_data[1], 1);
             CHECK_EQ(offset_data[2], 0);
