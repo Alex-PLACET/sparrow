@@ -386,13 +386,6 @@ namespace sparrow
         /**
          * @brief Inserts copies of a value before `pos`.
          *
-         * Rebuilds the type-ID buffer and child arrays. Complexity is
-         * O(N + U*C) for dense unions and O(N*C + U*C) for sparse unions,
-         * with O(N + C) and O(N*C) temporary storage respectively. N is the
-         * resulting length, C the child count, and U the number of distinct
-         * inserted alternatives. Requires offset zero; batch insertions are
-         * more efficient than repeated single-value insertions.
-         *
          * @return Iterator to the first inserted value.
          */
         iterator insert(const_iterator pos, const_reference value, size_type count = 1);
@@ -400,7 +393,6 @@ namespace sparrow
         /**
          * @brief Inserts copies of an owned value before `pos`.
          * @return Iterator to the first inserted value.
-         * @note Same complexity and offset requirement as the other insert overload.
          */
         iterator
         insert(const_iterator pos, const array_traits::value_type& value, size_type count = 1);
@@ -408,9 +400,6 @@ namespace sparrow
         /**
          * @brief Inserts a range before `pos`, repeated `count` times.
          * @return Iterator to the first inserted value.
-         * @note Complexity is O(K + N) dense or O(K + N*C) sparse, plus O(U*C)
-         *       for type matching; K is the input length. Single-pass ranges are
-         *       materialized once when necessary.
          */
         template <std::input_iterator InputIt>
         iterator insert(const_iterator pos, InputIt first, InputIt last, size_type count = 1)
@@ -460,52 +449,43 @@ namespace sparrow
         /**
          * @brief Erases the value at `pos`.
          * @return Iterator following the erased value.
-         * @note Complexity is O(N) for dense unions and O(N*C) for sparse unions; requires offset zero.
          */
         iterator erase(const_iterator pos);
 
         /**
          * @brief Erases the half-open range [`first`, `last`).
          * @return Iterator following the erased range.
-         * @note Complexity is O(N) for dense unions and O(N*C) for sparse unions; requires offset zero.
          */
         iterator erase(const_iterator first, const_iterator last);
 
         /**
          * @brief Appends a borrowed value.
-         * @note Equivalent to inserting before `end()`; complexity is O(N) dense or O(N*C) sparse.
          */
         void push_back(const_reference value);
 
         /**
          * @brief Appends an owned value.
-         * @note Equivalent to inserting before `end()`; complexity is O(N) dense or O(N*C) sparse.
          */
         void push_back(const array_traits::value_type& value);
 
         /**
          * @brief Resizes the array, default-inserting any appended values.
-         * @note Complexity is O(N) dense or O(N*C) sparse when the length changes;
-         *       no-op is O(1) and mutations require offset zero.
          */
         void resize(size_type new_length);
 
         /**
          * @brief Resizes the array, inserting `value` when it grows.
-         * @note Complexity is O(N) dense or O(N*C) sparse when the length changes; requires offset zero.
          */
         void resize(size_type new_length, const_reference value);
 
         /**
          * @brief Resizes the array, inserting `value` when it grows.
-         * @note Complexity is O(N) dense or O(N*C) sparse when the length changes; requires offset zero.
          */
         void resize(size_type new_length, const array_traits::value_type& value);
 
         /**
          * @brief Replaces stored values at null positions.
          *
-         * Complexity is O(N); the validity state and logical nullness are unchanged.
          */
         constexpr void zero_null_values(const inner_value_type& value)
         {
