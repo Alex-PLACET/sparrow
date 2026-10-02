@@ -639,10 +639,7 @@ namespace sparrow
             new_child_templates
         );
 
-        return adopt_rebuilt_array(
-            create_rebuild_proxy(std::move(new_children), std::move(payload), child_type_ids),
-            std::move(child_type_ids),
-            return_index
-        );
+        auto replacement = create_rebuild_proxy(std::move(new_children), std::move(payload), child_type_ids);
+        return adopt_rebuilt_array(std::move(replacement), std::move(child_type_ids), return_index);
     }
 }
