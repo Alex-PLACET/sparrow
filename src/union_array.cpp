@@ -35,12 +35,7 @@ namespace sparrow
         /// @brief Finds an existing type ID not yet assigned, or TYPE_ID_MAP_SIZE if none is free.
         std::size_t next_free_type_id(std::span<const bool> used_type_ids)
         {
-            std::size_t type_id = 0;
-            while (type_id < used_type_ids.size() && used_type_ids[type_id])
-            {
-                ++type_id;
-            }
-            return type_id;
+            return std::ranges::find(used_type_ids, false) - used_type_ids.begin();
         }
 
         /// @brief Resolves the child a plan entry targets: inserted values carry no child index,
