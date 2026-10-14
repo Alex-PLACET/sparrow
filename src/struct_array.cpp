@@ -171,7 +171,7 @@ namespace sparrow
         {
             inserted_values[child_index] = is_null_value
                                                ? array_default_value(*m_children[child_index])
-                                               : array_materialize_element(value[child_index]);
+                                               : value[child_index];
         }
 
         const size_type old_size = this->size();

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <numeric>
 #include <optional>
 
 #include "sparrow/array.hpp"
@@ -420,6 +421,27 @@ namespace sparrow
 
                 CHECK_EQ(dynamic.size(), 6);
                 CHECK_NULLABLE_VARIANT_EQ(dynamic[1], float32_t(0.0f));
+            }
+
+            SUBCASE("repeated self-insertion does not read the replaced children")
+            {
+                // The elements of a union array are array_traits::const_reference, so a snapshot
+                // of them aliases the children that the first insertion rebuilds.
+                constexpr std::size_t n = 1u << 18;
+                std::vector<std::int64_t> values(n);
+                std::iota(values.begin(), values.end(), std::int64_t(0));
+                std::vector<array> children{array(primitive_array<std::int64_t>(std::move(values)))};
+                sparse_union_array::type_id_buffer_type type_ids(std::vector<std::uint8_t>(n, 0));
+
+                array dynamic(sparse_union_array(std::move(children), std::move(type_ids)));
+                dynamic.insert(dynamic.cbegin(), dynamic.cbegin(), dynamic.cbegin() + 1, 2);
+
+                CHECK_EQ(dynamic.size(), n + 2);
+                CHECK_NULLABLE_VARIANT_EQ(dynamic[0], std::int64_t(0));
+                CHECK_NULLABLE_VARIANT_EQ(dynamic[1], std::int64_t(0));
+                CHECK_NULLABLE_VARIANT_EQ(dynamic[2], std::int64_t(0));
+                CHECK_NULLABLE_VARIANT_EQ(dynamic[3], std::int64_t(1));
+                CHECK_NULLABLE_VARIANT_EQ(dynamic.back(), std::int64_t(n - 1));
             }
 
             SUBCASE("fills nulls from empty existing children")

@@ -92,13 +92,13 @@ namespace sparrow
 
                 const value_type copied_value{nullable<std::vector<byte_t>>(expected)};
                 const array copied_array = array_make_from_element(copied_value);
-                const auto copied_element = array_materialize_element(copied_array[0]);
+                const value_type copied_element{copied_array[0]};
                 REQUIRE(std::get<nullable<std::vector<byte_t>>>(copied_element).has_value());
                 CHECK_EQ(std::get<nullable<std::vector<byte_t>>>(copied_element).get(), expected);
 
                 value_type moved_value{nullable<std::vector<byte_t>>(expected)};
                 const array moved_array = array_make_from_element(std::move(moved_value));
-                const auto moved_element = array_materialize_element(moved_array[0]);
+                const value_type moved_element{moved_array[0]};
                 REQUIRE(std::get<nullable<std::vector<byte_t>>>(moved_element).has_value());
                 CHECK_EQ(std::get<nullable<std::vector<byte_t>>>(moved_element).get(), expected);
             }
@@ -136,6 +136,51 @@ namespace sparrow
                 {
                     CHECK_NULLABLE_VARIANT_EQ(destination[static_cast<std::size_t>(i)], i);
                 }
+            }
+        }
+
+        TEST_CASE("array_traits::const_reference converts to array_traits::value_type")
+        {
+            // Each alternative of the const reference maps onto exactly one alternative of the
+            // value variant, its owning counterpart (see impl::materialized).
+            static_assert(impl::materialized_alternatives_v<
+                          array_traits::const_reference,
+                          array_traits::value_type>);
+
+            SUBCASE("nulls and primitive values")
+            {
+                const array ar{array(
+                    primitive_array<std::int32_t>(std::vector<nullable<std::int32_t>>{nullable<std::int32_t>(42)})
+                )};
+                const array_traits::value_type value = ar[0];
+                REQUIRE(std::holds_alternative<nullable<std::int32_t>>(value));
+                CHECK_EQ(std::get<nullable<std::int32_t>>(value).get(), 42);
+
+                const array null_ar{array(
+                    primitive_array<std::int32_t>(std::vector<nullable<std::int32_t>>{nullval})
+                )};
+                const array_traits::value_type null_value = null_ar[0];
+                CHECK(!std::get<nullable<std::int32_t>>(null_value).has_value());
+            }
+
+            SUBCASE("views are copied into their owning container")
+            {
+                const array string_array = array_make_from_element(
+                    array_traits::value_type{nullable<std::string>("copied")}
+                );
+                const std::string_view view = std::get<nullable<std::string_view>>(string_array[0]).get();
+                const array_traits::value_type string_value = string_array[0];
+                REQUIRE(std::holds_alternative<nullable<std::string>>(string_value));
+                CHECK_EQ(std::get<nullable<std::string>>(string_value).get(), "copied");
+                CHECK_NE(std::get<nullable<std::string>>(string_value).get().data(), view.data());
+
+                const std::vector<byte_t> expected{byte_t(1), byte_t(2)};
+                const array binary_array = array_make_from_element(
+                    array_traits::value_type{nullable<std::vector<byte_t>>(expected)}
+                );
+                const array_traits::value_type binary_value = binary_array[0];
+                REQUIRE(std::holds_alternative<nullable<std::vector<byte_t>>>(binary_value));
+                CHECK_EQ(std::get<nullable<std::vector<byte_t>>>(binary_value).get(), expected);
             }
         }
 

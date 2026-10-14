@@ -259,6 +259,85 @@ namespace sparrow
                                                 and std::is_assignable_v<
                                                     std::add_lvalue_reference_t<To2>,
                                                     conditional_ref_t<To2, From2>>;
+
+        /**
+         * @brief Owning counterpart of the type stored by a nullable.
+         *
+         * A nullable either owns its value or refers to a value (or a view of values) owned
+         * elsewhere. The owning counterpart of a reference is the referenced type, and the
+         * owning counterpart of a view is the container holding a copy of the viewed elements
+         * views must specialize this template (see sparrow/types/data_traits.hpp).
+         */
+        template <class T>
+        struct materialized
+        {
+            using type = std::remove_cvref_t<T>;
+        };
+
+        template <class T>
+        using materialized_t = typename materialized<T>::type;
+
+        /**
+         * @brief Owning counterpart of a nullable: same flag, materialized value.
+         */
+        template <class N>
+        using materialized_nullable_t = nullable<materialized_t<typename N::value_type>, typename N::flag_type>;
+
+        /**
+         * @brief Whether @p X is the type of exactly one of @p Ts.
+         */
+        template <class X, class... Ts>
+        inline constexpr bool unique_alternative = ((0 + ... + int(std::same_as<X, Ts>)) == 1);
+
+        /**
+         * @brief Whether every alternative of @p Source maps onto exactly one alternative of
+         *        @p Dest, its owning counterpart.
+         */
+        template <class Source, class Dest>
+        struct materialized_alternatives
+            : materialized_alternatives<typename Source::base_type, typename Dest::base_type>
+        {
+        };
+
+        template <class... U, class... T>
+        struct materialized_alternatives<std::variant<U...>, std::variant<T...>>
+            : std::bool_constant<(unique_alternative<materialized_nullable_t<U>, T...> and ...)>
+        {
+        };
+
+        template <class Source, class Dest>
+        inline constexpr bool materialized_alternatives_v = materialized_alternatives<Source, Dest>::value;
+
+        /**
+         * @brief Converts the active alternative of a nullable variant to its owning counterpart.
+         */
+        template <class Dest, class Source>
+        constexpr Dest materialize_variant(const Source& source)
+        {
+            return std::visit(
+                []<class N>(const N& value) -> Dest
+                {
+                    using destination_nullable = materialized_nullable_t<N>;
+                    if constexpr (std::constructible_from<destination_nullable, const N&>)
+                    {
+                        return Dest(std::in_place_type<destination_nullable>, value);
+                    }
+                    else
+                    {
+                        // Owning counterparts not constructible from the view itself (vector from span).
+                        return Dest(
+                            std::in_place_type<destination_nullable>,
+                            typename destination_nullable::value_type(
+                                value.get().begin(),
+                                value.get().end()
+                            ),
+                            value.has_value()
+                        );
+                    }
+                },
+                static_cast<const typename Source::base_type&>(source)
+            );
+        }
     }
 
     /**
@@ -1151,6 +1230,45 @@ namespace sparrow
         constexpr nullable_variant(const nullable<U, B>& value)
             : base_type(std::in_place_type<nullable<U, B>>, value)
         {
+        }
+
+        /**
+         * @brief Converting constructor from another nullable variant.
+         *
+         * Converts each alternative to its owning counterpart, so a variant of references or
+         * views (e.g. \c array_traits::const_reference) converts to a variant of owned values
+         * (e.g. \c array_traits::value_type). Only available when every alternative of the
+         * source has exactly one owning counterpart among \c T (see impl::materialized).
+         *
+         * @tparam U Alternative types of the source variant
+         * @param rhs Variant to convert
+         *
+         * @post The active alternative is the owning counterpart of the active alternative of rhs
+         */
+        template <class... U>
+            requires impl::materialized_alternatives_v<nullable_variant<U...>, nullable_variant<T...>>
+        constexpr nullable_variant(const nullable_variant<U...>& rhs)
+            : base_type(impl::materialize_variant<base_type>(rhs))
+        {
+        }
+
+        /**
+         * @brief Converting assignment operator from another nullable variant.
+         *
+         * See the converting constructor for the conditions under which the conversion is
+         * available.
+         *
+         * @tparam U Alternative types of the source variant
+         * @param rhs Variant to convert
+         * @return Reference to this variant
+         *
+         * @post The active alternative is the owning counterpart of the active alternative of rhs
+         */
+        template <class... U>
+            requires impl::materialized_alternatives_v<nullable_variant<U...>, nullable_variant<T...>>
+        constexpr nullable_variant& operator=(const nullable_variant<U...>& rhs)
+        {
+            return *this = nullable_variant(rhs);
         }
 
         constexpr nullable_variant(const nullable_variant&) = default;

@@ -408,42 +408,7 @@ namespace sparrow
             {
                 return iterator_at(static_cast<size_type>(pos - cbegin()));
             }
-
-            if constexpr (std::forward_iterator<InputIt>)
-            {
-                auto input_values = std::ranges::subrange(first, last);
-                if constexpr (std::same_as<std::remove_cvref_t<std::iter_reference_t<InputIt>>, array_traits::value_type>)
-                {
-                    return insert_materialized(pos, input_values, count);
-                }
-                else
-                {
-                    auto values = input_values
-                                  | std::views::transform(
-                                      [](const auto& value) -> array_traits::value_type
-                                      {
-                                          return array_materialize_element(value);
-                                      }
-                                  );
-                    return insert_materialized(pos, values, count);
-                }
-            }
-            else
-            {
-                std::vector<array_traits::value_type> values;
-                for (; first != last; ++first)
-                {
-                    if constexpr (std::same_as<std::remove_cvref_t<decltype(*first)>, array_traits::value_type>)
-                    {
-                        values.push_back(*first);
-                    }
-                    else
-                    {
-                        values.push_back(array_materialize_element(*first));
-                    }
-                }
-                return insert_materialized(pos, values, count);
-            }
+            return insert_materialized(pos, std::vector<array_traits::value_type>(first, last), count);
         }
 
         /**
@@ -642,21 +607,29 @@ namespace sparrow
             }
         }
 
-        template <std::ranges::forward_range R>
-            requires std::same_as<std::ranges::range_value_t<R>, array_traits::value_type>
-        iterator insert_materialized(const_iterator pos, R&& values, size_type count)
+        /**
+         * @brief Rebuilds the array with the owned @p inserted values repeated @p count times
+         *        before @p pos.
+         *
+         * @pre count > 0
+         */
+        iterator insert_materialized(
+            const_iterator pos,
+            std::vector<array_traits::value_type> inserted,
+            size_type count
+        )
         {
             const auto pos_index = static_cast<size_type>(pos - cbegin());
-            if (count == 0 || std::ranges::empty(values))
+            if (inserted.empty())
             {
                 return iterator_at(pos_index);
             }
 
+            SPARROW_ASSERT_TRUE(count > 0);
             SPARROW_ASSERT_TRUE(m_proxy.offset() == 0);
             SPARROW_ASSERT_TRUE(pos_index <= size());
 
             const auto old_size = size();
-            std::vector<array_traits::value_type> inserted(values.begin(), values.end());
             const auto value_count = static_cast<size_type>(inserted.size());
             std::vector<detail::union_rebuild_value> entries;
             entries.reserve(old_size + value_count * count);
@@ -1584,7 +1557,7 @@ namespace sparrow
         {
             return iterator_at(static_cast<size_type>(pos - cbegin()));
         }
-        return insert_materialized(pos, std::views::single(array_materialize_element(value)), count);
+        return insert(pos, array_traits::value_type(value), count);
     }
 
     template <class DERIVED>
@@ -1594,7 +1567,12 @@ namespace sparrow
         size_type count
     ) -> iterator
     {
-        return insert_materialized(pos, std::views::single(value), count);
+        // A no-op insertion must not require offset zero (see insert_materialized).
+        if (count == 0)
+        {
+            return iterator_at(static_cast<size_type>(pos - cbegin()));
+        }
+        return insert_materialized(pos, std::vector<array_traits::value_type>{value}, count);
     }
 
     template <class DERIVED>

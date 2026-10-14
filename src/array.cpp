@@ -240,8 +240,11 @@ namespace sparrow
                     );
                     if (&destination == &source_array)
                     {
-                        // Self-insertion: snapshot first to avoid iterator invalidation.
-                        const std::vector<typename array_type::value_type> values(source_first, source_last);
+                        using snapshot_type = std::conditional_t<
+                            std::same_as<typename array_type::value_type, array_traits::const_reference>,
+                            array_traits::value_type,
+                            typename array_type::value_type>;
+                        const std::vector<snapshot_type> values(source_first, source_last);
                         insert_repeated(destination, pos_index, values.cbegin(), values.cend(), count);
                     }
                     else
