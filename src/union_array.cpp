@@ -14,13 +14,23 @@
 
 #include "sparrow/union_array.hpp"
 
+#include <string>
+#include <vector>
+
 #include "sparrow/array.hpp"
 #include "sparrow/debug/copy_tracker.hpp"
-#include "sparrow/utils/metadata.hpp"
-#include "sparrow/utils/repeat_container.hpp"
+#include "sparrow/null_array.hpp"
 
 namespace sparrow
 {
+    namespace detail::union_rebuild
+    {
+        array make_null_child(std::size_t count, const arrow_proxy& child_proxy)
+        {
+            return array(null_array(count, child_proxy.name(), child_proxy.metadata()));
+        }
+    }
+
     namespace copy_tracker
     {
         template <>
@@ -74,7 +84,20 @@ namespace sparrow
 
     std::size_t dense_union_array::element_offset(std::size_t i) const
     {
-        return static_cast<std::size_t>(p_offsets[i]) + m_proxy.offset();
+        return static_cast<std::size_t>(p_offsets[i + m_proxy.offset()]);
+    }
+
+    auto dense_union_array::rebuild_in_place(
+        std::vector<detail::union_rebuild_value> values,
+        std::vector<array_traits::value_type> inserted,
+        size_type return_index
+    ) -> iterator
+    {
+        return union_array_crtp_base<dense_union_array>::rebuild_values(
+            std::move(values),
+            std::move(inserted),
+            return_index
+        );
     }
 
     /*************************************
@@ -105,5 +128,18 @@ namespace sparrow
     std::size_t sparse_union_array::element_offset(std::size_t i) const
     {
         return i + m_proxy.offset();
+    }
+
+    auto sparse_union_array::rebuild_in_place(
+        std::vector<detail::union_rebuild_value> values,
+        std::vector<array_traits::value_type> inserted,
+        size_type return_index
+    ) -> iterator
+    {
+        return union_array_crtp_base<sparse_union_array>::rebuild_values(
+            std::move(values),
+            std::move(inserted),
+            return_index
+        );
     }
 }

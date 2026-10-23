@@ -162,7 +162,7 @@ namespace sparrow
         result.reserve(source.size());
         for (const auto& value : source)
         {
-            result.push_back(array_materialize_element(value));
+            result.push_back(value);
         }
         return result;
     }
@@ -241,48 +241,6 @@ namespace sparrow
                 return nullable<T>(element);
             },
             value
-        );
-    }
-
-    array_traits::value_type array_materialize_element(const array_traits::const_reference& value)
-    {
-        using return_type = array_traits::value_type;
-        using const_reference_base_type = typename array_traits::const_reference::base_type;
-
-        return std::visit(
-            []<typename nullable_type>(const nullable_type& typed_value) -> return_type
-            {
-                using source_value_type = std::remove_cvref_t<typename nullable_type::value_type>;
-
-                if constexpr (std::same_as<source_value_type, std::string_view>)
-                {
-                    return return_type(
-                        nullable<std::string>(std::string(typed_value.get()), typed_value.has_value())
-                    );
-                }
-                else if constexpr (std::same_as<source_value_type, sequence_view<const byte_t>>)
-                {
-                    const auto bytes = typed_value.get();
-                    return return_type(
-                        nullable<std::vector<byte_t>>(
-                            std::vector<byte_t>(bytes.begin(), bytes.end()),
-                            typed_value.has_value()
-                        )
-                    );
-                }
-                else
-                {
-                    using stored_type = std::remove_cvref_t<decltype(typed_value.get())>;
-                    return return_type(
-                        nullable<stored_type>(stored_type(typed_value.get()), typed_value.has_value())
-                    );
-                }
-            },
-#if SPARROW_GCC_11_2_WORKAROUND
-            static_cast<const const_reference_base_type&>(value)
-#else
-            value
-#endif
         );
     }
 

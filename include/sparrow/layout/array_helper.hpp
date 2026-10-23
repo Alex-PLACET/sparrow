@@ -40,9 +40,6 @@ namespace sparrow
     [[nodiscard]] SPARROW_API array_traits::value_type
     array_default_value(const array_wrapper& ar);
 
-    [[nodiscard]] SPARROW_API array_traits::value_type
-    array_materialize_element(const array_traits::const_reference& value);
-
     [[nodiscard]] SPARROW_API array
     make_array_view(const array_wrapper& source);
 

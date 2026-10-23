@@ -17,6 +17,7 @@
 #include <chrono>
 #include <concepts>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "sparrow/layout/date_types.hpp"
@@ -243,6 +244,23 @@ namespace sparrow
         : common_native_types_traits<month_day_nanoseconds_interval>
     {
     };
+
+    namespace impl
+    {
+        // Owning counterparts of the views a layout exposes by reference, mirroring the
+        // value_type/const_reference pairs of the arrow_traits above.
+        template <>
+        struct materialized<std::string_view>
+        {
+            using type = std::string;
+        };
+
+        template <class T, std::size_t Extent>
+        struct materialized<sequence_view<T, Extent>>
+        {
+            using type = std::vector<std::remove_const_t<T>>;
+        };
+    }
 
     namespace detail
     {

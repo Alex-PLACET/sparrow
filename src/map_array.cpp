@@ -408,8 +408,8 @@ namespace sparrow
         inserted_items.reserve(value.size());
         for (const auto& entry : value)
         {
-            inserted_keys.push_back(array_materialize_element(entry.first));
-            inserted_items.push_back(array_materialize_element(entry.second));
+            inserted_keys.push_back(entry.first);
+            inserted_items.push_back(entry.second);
         }
 
         const size_type old_size = size();
