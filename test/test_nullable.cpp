@@ -1067,5 +1067,46 @@ namespace sparrow
             nv2 = std::move(nv3);
             CHECK_EQ(nv, nv2);
         }
+
+        TEST_CASE("converting constructor and assignment")
+        {
+            using reference_variant = nullable_variant<nullable<const int&>, nullable<const double&>>;
+            using value_variant = nullable_variant<nullable<int>, nullable<double>>;
+
+            // Each alternative of the source maps onto exactly one alternative of the target.
+            static_assert(impl::materializable_into<reference_variant, value_variant>);
+            // Alternatives without an owning counterpart make the conversion unavailable.
+            static_assert(not impl::materializable_into<value_variant, nullable_variant<nullable<const int&>>>);
+            static_assert(!std::is_constructible_v<
+                          nullable_variant<nullable<const double&>>,
+                          value_variant>);
+
+            const int int_value = 42;
+            const reference_variant reference{nullable<const int&>(int_value)};
+            const value_variant converted = reference;
+            REQUIRE(std::holds_alternative<nullable<int>>(converted));
+            CHECK_EQ(std::get<nullable<int>>(converted).get(), 42);
+
+            const reference_variant null_reference{nullable<const int&>(int_value, false)};
+            const value_variant converted_null = null_reference;
+            CHECK(!std::get<nullable<int>>(converted_null).has_value());
+
+            const double double_value = 1.5;
+            value_variant assigned{nullable<double>(0.0)};
+            assigned = reference_variant{nullable<const double&>(double_value)};
+            REQUIRE(std::holds_alternative<nullable<double>>(assigned));
+            CHECK_EQ(std::get<nullable<double>>(assigned).get(), 1.5);
+
+            // The flag is materialized with the same rule as the value: a flag reference
+            // becomes an owned bool.
+            using flag_reference_variant = nullable_variant<nullable<const int&, const bool&>>;
+            using flag_variant = nullable_variant<nullable<int>>;
+            static_assert(impl::materializable_into<flag_reference_variant, flag_variant>);
+            const bool valid = true;
+            const flag_reference_variant flag_reference{nullable<const int&, const bool&>(int_value, valid)};
+            const flag_variant flag_converted = flag_reference;
+            CHECK_EQ(std::get<nullable<int>>(flag_converted).get(), 42);
+            CHECK(std::get<nullable<int>>(flag_converted).has_value());
+        }
     }
 }
